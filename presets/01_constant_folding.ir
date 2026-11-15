@@ -1,0 +1,25 @@
+# Constant folding: nested constant expressions collapse into literals and
+# the folded constants propagate into stores, call arguments and branches.
+.entrypoint main
+
+.func main : unit
+.local @a : int
+.local @b : int
+.entry 0
+
+.block 0
+  v0 : int = add int 2, int 3
+  store @a v0
+  v1 : int = mul v0, int 10
+  store @b v1
+  v2 : int = add v1, int 0
+  v3 : bool = lt v2, int 100
+  branch v3 ? 1 : 2
+
+.block 1
+  call print, v2
+  ret unit
+
+.block 2
+  call print, v1
+  ret unit

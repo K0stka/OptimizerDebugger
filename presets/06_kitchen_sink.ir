@@ -1,0 +1,162 @@
+# Kitchen sink: one program exercising every optimizer pass and edge case.
+# Cases the optimizer cannot handle yet are included ON PURPOSE - the thrown
+# error is the expected result until the pass is fixed (value-operand identity
+# replacement currently throws in optimizer_constant_propagation.c).
+.entrypoint main
+
+# ---------------------------------------------------------------------------
+# Identities and calls that fold today.
+# ---------------------------------------------------------------------------
+.func helper : int
+.param @n : int
+.entry 0
+
+.block 0
+  v0 : int = load @n
+  v1 : int = sub v0, v0          # x - x -> 0 (ints only; NaN-safe on purpose)
+  v2 : int = add v1, int 0       # x + 0 where the surviving operand is constant
+  ret v2
+
+.func read_two : int
+.local @a : int
+.local @b : int
+.entry 0
+
+.block 0
+  v0 : int = call readInt        # zero-argument builtin call
+  v1 : int = call readInt
+  v2 : int = add v0, v1
+  v3 : int = mul v2, int 1       # x * 1 is NOT an identity in the current pass
+  store @a v3
+  v4 : int = load @a
+  ret v4
+
+# ---------------------------------------------------------------------------
+# Branch folding: constant conditions and same-target branches.
+# ---------------------------------------------------------------------------
+.func branches : unit
+.local @x : int
+.entry 0
+
+.block 0
+  v0 : int = load @x
+  v1 : bool = lt int 5, int 1    # folds to bool false
+  branch v1 ? 1 : 2              # folds to jump 2 (false target)
+.block 1
+  call print, string "never"
+  ret unit
+.block 2
+  branch v0 ? 3 : 3              # same targets -> jump 3 (even for a value condition)
+.block 3
+  v2 : bool = gt int 2, int 1    # folds to bool true
+  branch v2 ? 4 : 5              # folds to jump 4 (true target)
+.block 4
+  exit int 0
+.block 5
+  exit int 1
+
+# ---------------------------------------------------------------------------
+# Constants, doubles, strings, comparisons, propagation through stores.
+# ---------------------------------------------------------------------------
+.func folds : unit
+.local @a : int
+.local @d : double
+.local @s : string
+.entry 0
+
+.block 0
+  # Integer constant folding (done in 64-bit, truncated to 32-bit):
+  v0 : int = add int 2, int 3             # 5
+  v1 : int = mul v0, int 4                # 20
+  v2 : int = sub v1, int 30               # -10
+  store @a v2
+  v3 : int = mul int 1000000000, int 10   # overflow edge: wraps to 1410065408
+  store @a v3
+  v4 : int = add int -3, int -4           # -7
+  store @a v4
+  # Division by a constant zero is NOT folded yet (deliberate TODO):
+  v5 : int = load @a
+  v6 : int = idiv v5, int 0
+  store @a v6
+
+  # Double folding; the printer keeps full round-trip precision:
+  v7 : double = div double 7.0, double 2.0     # 3.5
+  v8 : double = add double 0.1, double 0.2     # 0.30000000000000004
+  store @d v8
+  v9 : double = int2double v0                  # 5
+  v10 : double = floor double -3.7             # -4
+  v11 : double = sub double 2.5, double 0.0    # x - (+0.0) identity
+  store @d v11
+  # Double x - x is correctly NOT folded (NaN semantics):
+  v12 : double = load @d
+  v13 : double = sub v12, v12
+  store @d v13
+  # Double division by constant zero is NOT folded:
+  v14 : double = div double 1.0, double 0.0
+  store @d v14
+
+  # String folding with escape round-trips:
+  v15 : string = concat string "a\nb", string "c\"d\\e"
+  v16 : string = concat string "", string "lead"   # empty-string identity
+  v17 : string = concat v15, v16
+  store @s v17
+
+  # Comparisons over every type:
+  v18 : bool = eq string "a", string "a"      # true
+  v19 : bool = lt int 5, int 1                # false
+  v20 : bool = not bool false                 # true
+  v21 : bool = eq double 1.5, double 1.5      # true
+  v22 : bool = le double 1.0, double 2.0      # true
+  v23 : bool = gt int -1, int -2              # true
+  v24 : bool = eq bool true, bool true        # true
+  v25 : bool = ne v0, int 999                 # true (v0 folded to 5)
+
+  # Branch on a folded constant condition:
+  branch v18 ? 1 : 2
+.block 1
+  call print, string "taken"
+  ret unit
+.block 2
+  call print, string "not taken"
+  ret unit
+
+# ---------------------------------------------------------------------------
+# Value-operand identities: the surviving operand is a value (e.g. a load),
+# which needs value replacement. These currently CRASH - included on purpose,
+# the error must be fixed in the optimizer (see the diagnostics drawer).
+# ---------------------------------------------------------------------------
+.func value_identities : int
+.local @x : int
+.local @s : string
+.entry 0
+
+.block 0
+  v0 : int = load @x
+  v1 : int = add v0, int 0        # x + 0
+  v2 : int = add int 0, v1        # 0 + x
+  v3 : int = sub v2, int 0        # x - 0
+  v4 : int = idiv v3, int 1       # x / 1
+  store @x v4
+  v5 : string = load @s
+  v6 : string = concat v5, string ""   # s + ""
+  call print, v6
+  ret int 0
+
+# ---------------------------------------------------------------------------
+# main: calls across functions, call-argument propagation.
+# ---------------------------------------------------------------------------
+.func main : unit
+.local @sum : int
+.entry 0
+
+.block 0
+  v0 : int = call helper, int 21
+  v1 : int = call read_two
+  v2 : int = add v0, v1
+  store @sum v2
+  v3 : string = call chr, v0
+  call print, v3
+  call print, v2
+  v4 : int = call value_identities
+  call print, v4
+  ret unit

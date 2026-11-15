@@ -1,0 +1,21 @@
+# Identity folding: x+0, 0+x, x-0, x/1 and s+"" collapse to x / s.
+# The whole arithmetic chain below should reduce to the load of @x.
+.entrypoint main
+
+.func main : unit
+.local @x : int
+.local @s : string
+.entry 0
+
+.block 0
+  v0 : int = load @x
+  v1 : int = add v0, int 0
+  v2 : int = add int 0, v1
+  v3 : int = sub v2, int 0
+  v4 : int = idiv v3, int 1
+  store @x v4
+
+  v5 : string = load @s
+  v6 : string = concat v5, string ""
+  call print, v6
+  ret unit

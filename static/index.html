@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>IFJ26 Optimizer Debugger</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>IFJ26 <em>optimizer debugger</em></h1>
+    <div class="controls">
+      <label class="ctl" title="Load a preset IR program">
+        preset
+        <select id="preset-select">
+          <option value="">—</option>
+        </select>
+      </label>
+      <label class="ctl chk" title="Re-run the optimizer automatically after edits">
+        <input type="checkbox" id="auto-chk">
+        auto
+      </label>
+      <button id="optimize-btn" class="primary" title="Run the freshly built optimizer (Ctrl+Enter)">
+        Optimize <kbd>Ctrl+↵</kbd>
+      </button>
+      <button id="rebuild-btn" title="Force recompilation of ifj26-opt from the repository sources">
+        Rebuild
+      </button>
+    </div>
+  </header>
+
+  <main class="panes">
+    <section class="pane">
+      <div class="pane-head">IR input</div>
+      <div class="editor-wrap">
+        <div id="gutter" class="gutter">1</div>
+        <div class="editor-stack">
+          <pre id="input-highlight" class="highlight-layer" aria-hidden="true"></pre>
+          <textarea id="input" spellcheck="false" autocomplete="off" wrap="off"
+            placeholder="# Paste IR here, or pick a preset above.&#10;.entrypoint main&#10;&#10;.func main : unit&#10;.entry 0&#10;&#10;.block 0&#10;  call print, string &quot;hello&quot;&#10;  ret unit"></textarea>
+        </div>
+      </div>
+    </section>
+    <section class="pane">
+      <div class="pane-head">
+        <span>Optimized IR</span>
+        <span id="stats-line"></span>
+      </div>
+      <div id="output" class="editor-view" tabindex="0"><span class="muted">— press Optimize —</span></div>
+    </section>
+  </main>
+
+  <footer id="diag" class="diag hidden">
+    <div class="diag-head">
+      <span id="diag-title">Diagnostics</span>
+      <button id="diag-close" title="Hide diagnostics">×</button>
+    </div>
+    <pre id="diag-body"></pre>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

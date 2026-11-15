@@ -1,0 +1,36 @@
+# A while loop summing 0..limit. Loads and stores are opaque to the current
+# passes, so most of this survives optimization unchanged.
+.entrypoint main
+
+.func main : unit
+.local @limit : int
+.local @sum : int
+.local @i : int
+.entry 0
+
+.block 0
+  store @limit int 4
+  store @sum int 0
+  store @i int 0
+  jump 1
+
+.block 1
+  v0 : int = load @i
+  v1 : int = load @limit
+  v2 : bool = lt v0, v1
+  branch v2 ? 2 : 3
+
+.block 2
+  v3 : int = load @sum
+  v4 : int = load @i
+  v5 : int = add v3, v4
+  store @sum v5
+  v6 : int = load @i
+  v7 : int = add v6, int 1
+  store @i v7
+  jump 1
+
+.block 3
+  v8 : int = load @sum
+  call print, v8
+  ret unit

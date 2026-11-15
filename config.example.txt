@@ -1,0 +1,8 @@
+# IFJ26 Optimizer Debugger configuration
+
+# Path to the IFJ26 repository root (the directory that contains src/).
+# The playground compiles <repo>/src/*.c read-only; nothing is written there.
+repo = C:/Users/User/Documents/IFJ26
+
+# Port the web interface listens on (127.0.0.1 only).
+port = 8080

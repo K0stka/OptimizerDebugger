@@ -916,7 +916,8 @@ static bool needs_build(int flavor, bool* binary_ok) {
 /**
  * @brief Compiles one source file into its object file
  */
-static bool compile_source(int flavor, const char* source, Buf* log) {
+static bool compile_source(int flavor, const char* source, bool force,
+                           int64_t header_time, Buf* log) {
   // Object name: opt_src files are prefixed to avoid any basename collisions
   const char* base = strrchr(source, '/');
   base = base == NULL ? source : base + 1;
@@ -927,6 +928,11 @@ static bool compile_source(int flavor, const char* source, Buf* log) {
   char object[1200];
   snprintf(object, sizeof(object), "build/%s/obj/%s%s.o", FLAVOR_NAMES[flavor],
            from_opt_src ? "opt_" : "", stem);
+
+  int64_t object_time = file_mtime(object);
+  if (!force && object_time >= 0 && object_time >= file_mtime(source) &&
+      object_time >= header_time)
+    return true;
 
   Buf command = {0};
   buf_printf(&command, "clang -std=c17 -Wall -Wextra -pedantic %s -I\"%s/src\" "
@@ -996,10 +1002,17 @@ static bool build_flavor(int flavor, bool force, Buf* log) {
     return false;
   }
 
-  // Compile every source; stop at the first failure
+  // Any header change invalidates all objects; source edits rebuild individually.
+  int64_t header_time = -1;
+  for (size_t i = 0; i < headers.count; i++) {
+    int64_t modified = file_mtime(headers.items[i]);
+    if (modified > header_time)
+      header_time = modified;
+  }
+
   bool ok = true;
   for (size_t i = 0; i < sources.count && ok; i++)
-    ok = compile_source(flavor, sources.items[i], log);
+    ok = compile_source(flavor, sources.items[i], force, header_time, log);
 
   // Link
   if (ok) {
@@ -1412,7 +1425,7 @@ static void handle_optimize(socket_t sock, const char* query, const char* body,
   char binary[1200];
   binary_path(flavor, binary, sizeof(binary));
   char command[1400];
-  snprintf(command, sizeof(command), "\"%s\"", binary);
+  snprintf(command, sizeof(command), "\"%s\" --verbose", binary);
 
   ProcResult proc = {0};
   if (!run_process(command, body, body_len, &proc)) {

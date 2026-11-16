@@ -7,10 +7,9 @@ const els = {
   inputHighlight: $('input-highlight'),
   gutter: $('gutter'),
   output: $('output'),
+  outputGutter: $('output-gutter'),
   preset: $('preset-select'),
-  auto: $('auto-chk'),
   optimizeBtn: $('optimize-btn'),
-  rebuildBtn: $('rebuild-btn'),
   statsLine: $('stats-line'),
   diag: $('diag'),
   diagTitle: $('diag-title'),
@@ -34,7 +33,6 @@ function saveState() {
   const state = {
     input: els.input.value,
     preset: els.preset.value,
-    auto: els.auto.checked,
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -59,7 +57,6 @@ function restoreState() {
       [...els.preset.options].some((o) => o.value === state.preset)
     )
       els.preset.value = state.preset;
-    els.auto.checked = state.auto === true;
     return typeof state.input === 'string';
   } catch (err) {
     return false;
@@ -76,13 +73,6 @@ function updateGutter() {
   for (let i = 1; i <= lines; i++) text += i + '\n';
   els.gutter.textContent = text;
   els.gutter.scrollTop = els.input.scrollTop;
-}
-
-// The textarea holds transparent text for interaction; this layer draws the
-// highlighted copy behind it and is scroll-synced with the textarea.
-function renderInputHighlight() {
-  els.inputHighlight.innerHTML = highlight(els.input.value) + '\u200b';
-  syncInputHighlightScroll();
 }
 
 function syncInputHighlightScroll() {
@@ -108,13 +98,36 @@ const HIGHLIGHT_RE = new RegExp(
       'load|store|call|jump|branch|ret|exit)\\b', // 6 opcode
     '\\b(int|double|string|bool|unit)\\b', // 7 type
     '(\\b\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?\\b)', // 8 number
+    '([A-Za-z_][A-Za-z0-9_]*)', // 9 function names and other identifiers
   ].join('|'),
   'gm'
 );
 
-// Match on the RAW text and escape during assembly: matching on pre-escaped
-// text would let e.g. the `gt` opcode split the `&gt;` entity in half.
-function highlight(source) {
+// Local identifiers share a key only within their function.
+function referenceKey(source, token, index, scope) {
+  const prefix = source.slice(0, index);
+  if (/^\s*(?:\.func|\.entrypoint)\s+$|\bcall\s+$/.test(prefix))
+    return `function:${token}`;
+  if (/^@[A-Za-z0-9_]+$/.test(token)) return `slot:${scope}:${token}`;
+  if (/^v\d+$/.test(token)) return `value:${scope}:${token}`;
+  if (/^\d+$/.test(token) &&
+      (/^\s*(?:\.block|\.entry|jump)\s+$/.test(prefix) ||
+       /^\s*branch\b.*[?:]\s*$/.test(prefix)))
+    return `block:${scope}:${token}`;
+  return null;
+}
+
+function functionScopes(source) {
+  let scope = '';
+  return source.split('\n').map((line) => {
+    const match = line.match(/^\s*\.func\s+(\S+)/);
+    if (match) scope = match[1];
+    return scope;
+  });
+}
+
+// Match raw text, then escape it so tokens cannot split HTML entities.
+function highlight(source, scope = '') {
   let out = '';
   let last = 0;
   for (const match of source.matchAll(HIGHLIGHT_RE)) {
@@ -127,8 +140,10 @@ function highlight(source) {
       : value ? 't-value'
       : op ? 't-opcode'
       : type ? 't-type'
-      : 't-number';
-    out += `<span class="${cls}">${escapeHtml(full)}</span>`;
+      : match[8] ? 't-number' : 't-symbol';
+    const ref = comment || str || dir ? null : referenceKey(source, full, match.index, scope);
+    const attr = ref ? ` data-ref="${encodeURIComponent(ref)}"` : '';
+    out += `<span class="${cls}"${attr}>${escapeHtml(full)}</span>`;
     last = match.index + full.length;
   }
   out += escapeHtml(source.slice(last));
@@ -136,6 +151,7 @@ function highlight(source) {
 }
 
 function renderOutput(text) {
+  els.outputGutter.textContent = '';
   if (text == null) {
     els.output.innerHTML = '<span class="muted">— no output —</span>';
   } else if (text === '') {
@@ -304,12 +320,14 @@ function computeDiffLayout(beforeText, afterText) {
  */
 function renderInputHighlight() {
   const lines = els.input.value.split('\n');
+  const scopes = functionScopes(els.input.value);
+  clearReferenceHighlight();
   const html = lines
     .map((line, i) => {
       const hunk = currentMarks ? currentMarks.input.get(i) : null;
       const cls = hunk != null ? ' mark-del' : '';
       const h = hunk != null ? ` data-h="${hunk}"` : '';
-      return `<div class="hl-line${cls}"${h}>${highlight(line) || '\u200b'}</div>`;
+      return `<div class="hl-line${cls}"${h}>${highlight(line, scopes[i]) || '\u200b'}</div>`;
     })
     .join('');
   els.inputHighlight.innerHTML = html;
@@ -324,19 +342,28 @@ function renderInputHighlight() {
  */
 function renderOutputPane() {
   if (!lastGood || !currentRows) return;
+  const scopes = functionScopes(lastGood.output);
+  clearReferenceHighlight();
+  const numbers = [];
   const html = currentRows
     .map((row) => {
-      if (row.kind === 'del') return '<div class="ol-line filler">\u200b</div>';
+      if (row.kind === 'del') {
+        numbers.push('');
+        return '<div class="ol-line filler">\u200b</div>';
+      }
       // An output-only blank line is pure formatting - skip it so the panes
       // stay aligned
       if (row.kind === 'add' && !row.r.content) return '';
+      numbers.push(row.r.idx + 1);
       const marked = row.kind === 'add' || row.kind === 'chg';
       const cls = marked ? ' mark-add' : '';
       const h = marked ? ` data-h="${row.hunk}"` : '';
-      return `<div class="ol-line${cls}"${h}>${highlight(row.r.text) || '\u200b'}</div>`;
+      return `<div class="ol-line${cls}"${h}>${highlight(row.r.text, scopes[row.r.idx]) || '\u200b'}</div>`;
     })
     .join('');
   els.output.innerHTML = html;
+  els.outputGutter.textContent = numbers.join('\n') + '\n';
+  els.outputGutter.scrollTop = els.output.scrollTop;
 }
 
 /**
@@ -398,14 +425,14 @@ function hideDiag() {
 
 async function optimize() {
   if (busy) return;
+  clearTimeout(runTimer);
   busy = true;
   els.optimizeBtn.disabled = true;
-  const buttonLabel = els.optimizeBtn.innerHTML;
-  els.optimizeBtn.textContent = 'Optimizing…';
+  els.optimizeBtn.setAttribute('aria-busy', 'true');
 
+  // Diff against exactly what was sent (the user may keep typing meanwhile).
+  const sent = els.input.value;
   try {
-    // Diff against exactly what was sent (the user may keep typing meanwhile)
-    const sent = els.input.value;
     const data = await api('/api/optimize?flavor=release', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -462,29 +489,11 @@ async function optimize() {
   } finally {
     busy = false;
     els.optimizeBtn.disabled = false;
-    els.optimizeBtn.innerHTML = buttonLabel;
-  }
-}
-
-async function rebuild() {
-  if (busy) return;
-  busy = true;
-  els.rebuildBtn.disabled = true;
-  const buttonLabel = els.rebuildBtn.textContent;
-  els.rebuildBtn.textContent = 'Rebuilding…';
-
-  try {
-    const data = await api('/api/rebuild?flavor=release', {
-      method: 'POST',
-    });
-    showDiag('Rebuild', data.ok ? data.log : 'REBUILD FAILED:\n' + data.log);
-  } catch (err) {
-    showDiag('Rebuild failed', String(err.message || err));
-  } finally {
-    busy = false;
-    els.rebuildBtn.disabled = false;
-    els.rebuildBtn.textContent = buttonLabel;
-    optimize();
+    els.optimizeBtn.removeAttribute('aria-busy');
+    if (els.input.value !== sent) {
+      clearTimeout(runTimer);
+      runTimer = setTimeout(optimize, 600);
+    }
   }
 }
 
@@ -513,7 +522,7 @@ async function selectPreset(name) {
     updateGutter();
     renderInputHighlight();
     saveState();
-    if (els.auto.checked) optimize();
+    optimize();
   } catch (err) {
     showDiag('Preset failed to load', String(err.message || err));
   }
@@ -530,26 +539,54 @@ els.input.addEventListener('input', () => {
   renderInputHighlight();
   saveStateDebounced();
   clearTimeout(runTimer);
-  if (els.auto.checked) runTimer = setTimeout(optimize, 600);
+  runTimer = setTimeout(optimize, 600);
 });
 
 // Keep the two panes' vertical scroll in lockstep (the alignment fillers
 // make their line positions correspond 1:1 in both layouts)
+const syncedScrollPositions = new WeakMap();
+
+function syncPaneScroll(source, target) {
+  const expected = syncedScrollPositions.get(source);
+  syncedScrollPositions.delete(source);
+  // A clamped programmatic scroll must not pull the initiating pane back.
+  if (source.scrollTop === expected) return;
+  const previous = target.scrollTop;
+  target.scrollTop = source.scrollTop;
+  if (target.scrollTop !== previous)
+    syncedScrollPositions.set(target, target.scrollTop);
+}
+
 els.input.addEventListener('scroll', () => {
   els.gutter.scrollTop = els.input.scrollTop;
   syncInputHighlightScroll();
-  if (els.output.scrollTop !== els.input.scrollTop)
-    els.output.scrollTop = els.input.scrollTop;
+  syncPaneScroll(els.input, els.output);
 });
 
 els.output.addEventListener('scroll', () => {
-  if (els.input.scrollTop !== els.output.scrollTop)
-    els.input.scrollTop = els.output.scrollTop;
+  els.outputGutter.scrollTop = els.output.scrollTop;
+  syncPaneScroll(els.output, els.input);
 });
 
 // Linked highlighting: hovering a marked line brightens the whole hunk it
 // belongs to, on both the input and the output side
 let hoverHunk = null;
+let hoverReference = null;
+
+function clearReferenceHighlight() {
+  hoverReference = null;
+  document.querySelectorAll('.ref-highlight')
+    .forEach((el) => el.classList.remove('ref-highlight'));
+}
+
+function setReferenceHighlight(ref) {
+  if (ref === hoverReference) return;
+  clearReferenceHighlight();
+  hoverReference = ref;
+  if (ref) document.querySelectorAll('[data-ref]').forEach((el) => {
+    if (el.dataset.ref === ref) el.classList.add('ref-highlight');
+  });
+}
 
 function setHunkHighlight(hunk) {
   if (hunk === hoverHunk) return;
@@ -570,10 +607,12 @@ function clearHunkHighlight() {
 }
 
 els.output.addEventListener('mouseover', (event) => {
+  setReferenceHighlight(event.target.closest('[data-ref]')?.dataset.ref || null);
   const line = event.target.closest('.ol-line');
   setHunkHighlight(line && line.dataset.h ? Number(line.dataset.h) : null);
 });
 els.output.addEventListener('mouseleave', clearHunkHighlight);
+els.output.addEventListener('mouseleave', clearReferenceHighlight);
 
 // The input is a textarea, so the hovered line is derived from the cursor;
 // mousemove (not mouseover) is needed since the textarea is one element and
@@ -588,11 +627,24 @@ function hoveredInputLine(event) {
 }
 
 els.input.addEventListener('mousemove', (event) => {
-  if (!currentMarks || currentMarks.input.size === 0) return;
-  const hunk = currentMarks.input.get(hoveredInputLine(event));
+  const lineIndex = hoveredInputLine(event);
+  const line = els.inputHighlight.children[lineIndex];
+  let ref = null;
+  // Hit-test the drawn tokens beneath the textarea, including horizontal scroll.
+  for (const token of line?.querySelectorAll('[data-ref]') || []) {
+    const rect = token.getBoundingClientRect();
+    if (event.clientX >= rect.left && event.clientX < rect.right &&
+        event.clientY >= rect.top && event.clientY < rect.bottom) {
+      ref = token.dataset.ref;
+      break;
+    }
+  }
+  setReferenceHighlight(ref);
+  const hunk = currentMarks?.input.get(lineIndex);
   setHunkHighlight(hunk != null ? hunk : null);
 });
 els.input.addEventListener('mouseleave', clearHunkHighlight);
+els.input.addEventListener('mouseleave', clearReferenceHighlight);
 
 els.input.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
@@ -602,13 +654,8 @@ els.input.addEventListener('keydown', (event) => {
 });
 
 els.optimizeBtn.addEventListener('click', optimize);
-els.rebuildBtn.addEventListener('click', rebuild);
 els.diagClose.addEventListener('click', hideDiag);
 els.preset.addEventListener('change', () => selectPreset(els.preset.value));
-els.auto.addEventListener('change', () => {
-  saveState();
-  if (els.auto.checked) optimize();
-});
 
 (async function init() {
   // Presets must be populated before state restore so the picked preset can
@@ -623,7 +670,7 @@ els.auto.addEventListener('change', () => {
   if (!restored && els.preset.options.length > 1) {
     els.preset.selectedIndex = 1;
     await selectPreset(els.preset.value);
-  } else if (els.auto.checked && els.input.value.trim()) {
+  } else if (els.input.value.trim()) {
     optimize();
   }
 })();

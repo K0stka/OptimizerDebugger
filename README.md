@@ -15,11 +15,14 @@ Then open http://127.0.0.1:8080.
 
 - The optimizer binary is rebuilt automatically whenever any file in
   `<repo>/src` or `opt_src/` is newer than the binary — edit the optimizer,
-  save, press Optimize (or enable *auto*), and the fresh code runs. No server
+  save, press Optimize, and the fresh code runs. No server
   restart needed.
-- *Rebuild* forces recompilation; *build* switches between the release (-O3)
-  and debug (-g -O0) flavors.
+- Hot reload reuses unchanged object files; header edits rebuild all sources.
 - The current IR is stored in the browser's local storage and survives reloads.
+- Input edits automatically run the optimizer after a short pause.
+- Web optimizer runs enable `--verbose` and show DEBUG output in the diagnostics drawer.
+- Hover values, slots, block targets, or function names to highlight matching
+  references across both panes. Local identifiers are scoped to their function.
 - Presets live in `presets/*.ir`.
 
 ## The ifj26-opt tool (CLI)
@@ -33,6 +36,8 @@ It reads textual IR on stdin and writes a JSON envelope (or plain IR with
 check), `--verbose` forwards the compiler's debug output to stderr.
 
 ## Configuration
+
+Symbol highlighting checks: `node tests/highlighting.cjs`.
 
 `config.txt`:
 

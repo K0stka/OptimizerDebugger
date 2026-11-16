@@ -50,6 +50,8 @@ typedef SOCKET socket_t;
 #include <dirent.h>     // opendir, readdir
 #include <fcntl.h>      // fcntl
 #include <pthread.h>    // reader thread
+#include <errno.h>      // ETIMEDOUT
+#include <signal.h>     // kill, SIGKILL, SIGPIPE
 #include <sys/socket.h> // socket, bind, listen, accept, recv, send
 #include <sys/stat.h>   // stat, mkdir
 #include <sys/types.h>  // pid_t
@@ -68,6 +70,8 @@ typedef int socket_t;
 #define MAX_BODY_SIZE (8 * 1024 * 1024)
 /// Hard cap on the build log kept for the UI
 #define MAX_LOG_SIZE (48 * 1024)
+#define OPTIMIZE_TIMEOUT_MS 5000
+#define BUILD_TIMEOUT_MS 60000
 
 ////////////////////////////////////////////////////////////////////////////////
 // Dynamic buffer
@@ -541,6 +545,7 @@ static bool repo_ok(void) {
  */
 typedef struct {
   bool spawned;   // Whether the process was created at all
+  bool timed_out;
   int exit_code;
   Buf out;  // stdout
   Buf err;  // stderr
@@ -555,6 +560,22 @@ static void proc_result_free(ProcResult* result) {
 }
 
 #ifdef _WIN32
+
+typedef struct {
+  HANDLE done;
+  HANDLE job;
+  unsigned timeout_ms;
+  bool timed_out;
+} ProcessTimer;
+
+static unsigned __stdcall process_timer(void* argument) {
+  ProcessTimer* timer = argument;
+  if (WaitForSingleObject(timer->done, timer->timeout_ms) == WAIT_TIMEOUT) {
+    timer->timed_out = true;
+    TerminateJobObject(timer->job, 124);
+  }
+  return 0;
+}
 
 /**
  * @brief Thread argument for the stdout reader
@@ -582,7 +603,7 @@ static unsigned __stdcall reader_thread(void* argument) {
  * @brief Spawns cmdline (CreateProcess syntax), pipes stdin, captures stdout/stderr
  */
 static bool run_process(const char* cmdline, const char* stdin_data,
-                        size_t stdin_len, ProcResult* result) {
+                        size_t stdin_len, unsigned timeout_ms, ProcResult* result) {
   result->spawned = false;
   result->exit_code = -1;
 
@@ -594,6 +615,12 @@ static bool run_process(const char* cmdline, const char* stdin_data,
       !CreatePipe(&out_read, &out_write, &inherit, 0) ||
       !CreatePipe(&err_read, &err_write, &inherit, 0)) {
     buf_puts(&result->err, "CreatePipe failed");
+    if (in_read != NULL) CloseHandle(in_read);
+    if (in_write != NULL) CloseHandle(in_write);
+    if (out_read != NULL) CloseHandle(out_read);
+    if (out_write != NULL) CloseHandle(out_write);
+    if (err_read != NULL) CloseHandle(err_read);
+    if (err_write != NULL) CloseHandle(err_write);
     return false;
   }
 
@@ -613,8 +640,21 @@ static bool run_process(const char* cmdline, const char* stdin_data,
 #ifndef CREATE_NO_WINDOW
 #define CREATE_NO_WINDOW 0x08000000
 #endif
+  HANDLE job = CreateJobObjectA(NULL, NULL);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {0};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (job == NULL || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                             &limits, sizeof(limits))) {
+    if (job != NULL) CloseHandle(job);
+    CloseHandle(in_read); CloseHandle(in_write);
+    CloseHandle(out_read); CloseHandle(out_write);
+    CloseHandle(err_read); CloseHandle(err_write);
+    buf_puts(&result->err, "failed to create subprocess job");
+    return false;
+  }
   BOOL created = CreateProcessA(NULL, (LPSTR)cmdline, NULL, NULL, TRUE,
-                                CREATE_NO_WINDOW, NULL, NULL, &startup, &process);
+                                CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                                NULL, NULL, &startup, &process);
 
   // Close the child ends we do not use
   CloseHandle(in_read);
@@ -622,13 +662,30 @@ static bool run_process(const char* cmdline, const char* stdin_data,
   CloseHandle(err_write);
 
   if (!created) {
+    CloseHandle(job);
     buf_printf(&result->err, "CreateProcess failed (error %lu)", GetLastError());
     CloseHandle(in_write);
     CloseHandle(out_read);
     CloseHandle(err_read);
     return false;
   }
+  ProcessTimer timer = {.done = CreateEventA(NULL, TRUE, FALSE, NULL),
+                        .job = job, .timeout_ms = timeout_ms};
+  uintptr_t watchdog = 0;
+  if (AssignProcessToJobObject(job, process.hProcess) && timer.done != NULL)
+    watchdog = _beginthreadex(NULL, 0, process_timer, &timer, 0, NULL);
+  if (watchdog == 0) {
+    TerminateProcess(process.hProcess, 1);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    CloseHandle(process.hProcess); CloseHandle(process.hThread);
+    CloseHandle(in_write); CloseHandle(out_read); CloseHandle(err_read);
+    if (timer.done != NULL) CloseHandle(timer.done);
+    CloseHandle(job);
+    buf_puts(&result->err, "failed to start subprocess timeout guard");
+    return false;
+  }
   result->spawned = true;
+  ResumeThread(process.hThread);
 
   // Drain stdout on a helper thread so a chatty child cannot block us
   ReaderArg reader_arg = {.handle = out_read, .target = &result->out};
@@ -672,11 +729,50 @@ static bool run_process(const char* cmdline, const char* stdin_data,
   CloseHandle(process.hProcess);
   CloseHandle(process.hThread);
 
-  result->exit_code = (int)exit_code;
+  SetEvent(timer.done);
+  WaitForSingleObject((HANDLE)watchdog, INFINITE);
+  CloseHandle((HANDLE)watchdog);
+  CloseHandle(timer.done);
+  CloseHandle(job);
+  result->timed_out = timer.timed_out;
+  if (result->timed_out)
+    buf_printf(&result->err, "\nProcess timed out after %u ms\n", timeout_ms);
+
+  result->exit_code = result->timed_out ? 124 : (int)exit_code;
   return true;
 }
 
 #else  // POSIX
+
+typedef struct {
+  pthread_mutex_t mutex;
+  pthread_cond_t condition;
+  bool done;
+  bool timed_out;
+  pid_t pid;
+  unsigned timeout_ms;
+} ProcessTimer;
+
+static void* process_timer(void* argument) {
+  ProcessTimer* timer = argument;
+  struct timespec deadline;
+  clock_gettime(CLOCK_REALTIME, &deadline);
+  deadline.tv_sec += timer->timeout_ms / 1000;
+  deadline.tv_nsec += (timer->timeout_ms % 1000) * 1000000L;
+  deadline.tv_sec += deadline.tv_nsec / 1000000000L;
+  deadline.tv_nsec %= 1000000000L;
+  pthread_mutex_lock(&timer->mutex);
+  while (!timer->done) {
+    int status = pthread_cond_timedwait(&timer->condition, &timer->mutex, &deadline);
+    if (status == ETIMEDOUT && !timer->done) {
+      timer->timed_out = true;
+      kill(-timer->pid, SIGKILL);
+      break;
+    }
+  }
+  pthread_mutex_unlock(&timer->mutex);
+  return NULL;
+}
 
 /**
  * @brief Thread argument for the stdout reader
@@ -704,7 +800,7 @@ static void* reader_thread(void* argument) {
  * @brief Spawns cmdline via /bin/sh, pipes stdin, captures stdout/stderr
  */
 static bool run_process(const char* cmdline, const char* stdin_data,
-                        size_t stdin_len, ProcResult* result) {
+                        size_t stdin_len, unsigned timeout_ms, ProcResult* result) {
   result->spawned = false;
   result->exit_code = -1;
 
@@ -727,6 +823,7 @@ static bool run_process(const char* cmdline, const char* stdin_data,
   }
 
   if (pid == 0) {
+    setpgid(0, 0);
     // Child: wire the pipes to std streams and exec
     dup2(in_pipe[0], STDIN_FILENO);
     dup2(out_pipe[1], STDOUT_FILENO);
@@ -746,6 +843,20 @@ static bool run_process(const char* cmdline, const char* stdin_data,
   close(out_pipe[1]);
   close(err_pipe[1]);
   result->spawned = true;
+  setpgid(pid, pid);
+  ProcessTimer timer = {.mutex = PTHREAD_MUTEX_INITIALIZER,
+                        .condition = PTHREAD_COND_INITIALIZER,
+                        .pid = pid, .timeout_ms = timeout_ms};
+  pthread_t watchdog;
+  if (pthread_create(&watchdog, NULL, process_timer, &timer) != 0) {
+    kill(-pid, SIGKILL);
+    waitpid(pid, NULL, 0);
+    close(in_pipe[1]); close(out_pipe[0]); close(err_pipe[0]);
+    pthread_cond_destroy(&timer.condition);
+    pthread_mutex_destroy(&timer.mutex);
+    buf_puts(&result->err, "failed to start subprocess timeout guard");
+    return false;
+  }
 
   // Drain stdout on a helper thread so a chatty child cannot block us
   ReaderArg reader_arg = {.fd = out_pipe[0], .target = &result->out};
@@ -780,10 +891,21 @@ static bool run_process(const char* cmdline, const char* stdin_data,
 
   if (reader_started)
     pthread_join(reader, NULL);
-  else
-    close(out_pipe[0]);
+  close(out_pipe[0]);
 
   close(err_pipe[0]);
+  pthread_mutex_lock(&timer.mutex);
+  timer.done = true;
+  pthread_cond_signal(&timer.condition);
+  pthread_mutex_unlock(&timer.mutex);
+  pthread_join(watchdog, NULL);
+  pthread_cond_destroy(&timer.condition);
+  pthread_mutex_destroy(&timer.mutex);
+  result->timed_out = timer.timed_out;
+  if (result->timed_out) {
+    result->exit_code = 124;
+    buf_printf(&result->err, "\nProcess timed out after %u ms\n", timeout_ms);
+  }
   return true;
 }
 
@@ -941,7 +1063,7 @@ static bool compile_source(int flavor, const char* source, bool force,
              object);
 
   ProcResult proc = {0};
-  bool spawned = run_process(command.data, NULL, 0, &proc);
+  bool spawned = run_process(command.data, NULL, 0, BUILD_TIMEOUT_MS, &proc);
   buf_free(&command);
 
   bool ok = spawned && proc.exit_code == 0;
@@ -1036,7 +1158,7 @@ static bool build_flavor(int flavor, bool force, Buf* log) {
 #endif
 
     ProcResult proc = {0};
-    if (!run_process(command.data, NULL, 0, &proc)) {
+    if (!run_process(command.data, NULL, 0, BUILD_TIMEOUT_MS, &proc)) {
       buf_puts(log, "failed to spawn clang for linking\n");
       ok = false;
     } else if (proc.exit_code != 0) {
@@ -1428,7 +1550,7 @@ static void handle_optimize(socket_t sock, const char* query, const char* body,
   snprintf(command, sizeof(command), "\"%s\" --verbose", binary);
 
   ProcResult proc = {0};
-  if (!run_process(command, body, body_len, &proc)) {
+  if (!run_process(command, body, body_len, OPTIMIZE_TIMEOUT_MS, &proc)) {
     send_error_json(sock, 500, "failed to spawn ifj26-opt");
     proc_result_free(&proc);
     buf_free(&response);
@@ -1442,7 +1564,10 @@ static void handle_optimize(socket_t sock, const char* query, const char* body,
   buf_puts(&response, "},\"stderr\":");
   buf_put_json_string(&response, proc.err.data != NULL ? proc.err.data : "");
 
-  if (proc.out.len > 0) {
+  if (proc.timed_out) {
+    buf_printf(&response, ",\"result\":{\"ok\":false,\"error\":\"Optimization timed out after %u ms\"}",
+               OPTIMIZE_TIMEOUT_MS);
+  } else if (proc.out.len > 0) {
     // The tool's stdout is a complete JSON envelope; embed it verbatim
     buf_puts(&response, ",\"result\":");
     buf_append(&response, proc.out.data, proc.out.len);
@@ -1598,6 +1723,10 @@ static void handle_client(socket_t sock) {
  * @brief Server entrypoint
  */
 int main(int argc, char** argv) {
+#ifndef _WIN32
+  // A timed-out child or disconnected HTTP client can close its pipe/socket.
+  signal(SIGPIPE, SIG_IGN);
+#endif
   // CLI flags (override config.txt)
   bool build_only = false;
   const char* repo_override = NULL;
@@ -1667,6 +1796,11 @@ int main(int argc, char** argv) {
     fprintf(stderr, "socket() failed\n");
     return 1;
   }
+#ifdef _WIN32
+  SetHandleInformation((HANDLE)listener, HANDLE_FLAG_INHERIT, 0);
+#else
+  fcntl(listener, F_SETFD, FD_CLOEXEC);
+#endif
 
   int reuse = 1;
   setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse,
@@ -1697,12 +1831,18 @@ int main(int argc, char** argv) {
 
     // Do not let a stalled client wedge the single-threaded server
 #ifdef _WIN32
+    SetHandleInformation((HANDLE)client, HANDLE_FLAG_INHERIT, 0);
     DWORD timeout_ms = 10000;
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_ms,
                sizeof(timeout_ms));
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout_ms,
+               sizeof(timeout_ms));
 #else
+    fcntl(client, F_SETFD, FD_CLOEXEC);
     struct timeval timeout = {10, 0};
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout,
+               sizeof(timeout));
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout,
                sizeof(timeout));
 #endif
 

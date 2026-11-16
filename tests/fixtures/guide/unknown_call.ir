@@ -1,0 +1,7 @@
+# Step 3 negative case: this name is neither a builtin nor a user function.
+.entrypoint main
+.func main : unit
+.entry 0
+.block 0
+  call missing_function
+  ret unit

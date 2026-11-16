@@ -1,0 +1,6 @@
+# Step 2 negative case: block 99 does not exist. The text parser rejects it.
+.entrypoint main
+.func main : unit
+.entry 0
+.block 0
+  jump 99

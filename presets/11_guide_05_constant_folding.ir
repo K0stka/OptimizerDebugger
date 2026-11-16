@@ -1,0 +1,22 @@
+# Guide step 5: arithmetic, conversion, strings, and comparisons.
+# Expected print arguments: 42, 21, 3, 3.5, -4, 42.0, "fold me", true.
+# Dependent folds require the pipeline to keep going until stable.
+.entrypoint main
+
+.func main : unit
+.entry 0
+
+.block 0
+  v0 : int = add int 19, int 2
+  v1 : int = mul v0, int 2
+  v2 : int = sub v1, int 21
+  v3 : int = idiv v2, int 7
+  v4 : double = div double 7.0, double 2.0
+  v5 : double = floor double -3.25
+  v6 : double = int2double v1
+  v7 : string = concat string "fold ", string "me"
+  v8 : bool = lt int 3, int 4
+  v9 : bool = not bool false
+  v10 : bool = eq v8, v9
+  call print, v1, v2, v3, v4, v5, v6, v7, v10
+  ret unit

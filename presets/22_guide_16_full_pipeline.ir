@@ -1,0 +1,68 @@
+# Guide step 16: one compact fixture composing the tutorial's passes.
+# Expected: entry arithmetic/slot traffic disappears and print receives 42.
+# The false path and unused function disappear; empty jumps are bypassed.
+# The input-dependent loop, its slot traffic, and reading calls must survive.
+# This is a new small fixture, not the guide's 24-function mock IR.
+.entrypoint main
+
+.func unused : unit
+.entry 0
+
+.block 0
+  call print, string "never called"
+  ret unit
+
+.func main : unit
+.local @answer : int
+.entry 0
+
+.block 0
+  v0 : int = add int 20, int 1
+  v1 : int = mul v0, int 2
+  store @answer v1
+  v2 : int = load @answer
+  call print, v2
+  v3 : bool = eq v1, int 42
+  branch v3 ? 1 : 2
+
+.block 1
+  jump 3
+
+.block 2
+  call print, string "wrong path"
+  ret unit
+
+.block 3
+  v4 : int = call readInt
+  v5 : int = call sum_to, v4
+  call print, v5
+  ret unit
+
+.func sum_to : int
+.param @n : int
+.local @i : int
+.local @sum : int
+.entry 0
+
+.block 0
+  store @i int 0
+  store @sum int 0
+  jump 1
+
+.block 1
+  v0 : int = load @i
+  v1 : int = load @n
+  v2 : bool = lt v0, v1
+  branch v2 ? 2 : 3
+
+.block 2
+  v3 : int = load @sum
+  v4 : int = add v3, v0
+  store @sum v4
+  v5 : int = add v0, int 1
+  store @i v5
+  jump 1
+
+.block 3
+  v6 : int = load @sum
+  ret v6

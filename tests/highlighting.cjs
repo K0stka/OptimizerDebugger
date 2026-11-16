@@ -29,7 +29,18 @@ assert.deepEqual(refs('v0 : int = call helper, int 21'),
   ['value:main:v0', 'function:helper']);
 assert.deepEqual(refs('call helper', 'main'), refs('.func helper : int', 'helper'));
 assert.deepEqual(refs('.entrypoint helper'), ['function:helper']);
-assert.deepEqual(refs('call print, string "v0 @x jump 2" # v1 @y'), ['function:print']);
+assert.deepEqual(refs('call print, string "v0 @x jump 2" # v1 @y'), []);
+const builtins = ['print', 'readLine', 'readInt', 'readBool', 'readDouble',
+  'toInt', 'toStr', 'strLen', 'strSub', 'ord', 'chr'];
+for (const name of builtins) {
+  assert.deepEqual(refs(`call ${name}, v0`), ['value:main:v0']);
+  assert.deepEqual(refs(`v1 : int = call ${name}, v0`),
+    ['value:main:v1', 'value:main:v0']);
+  assert.ok(highlight(`call ${name}`).includes(`<span class="t-builtin">${name}</span>`));
+}
+assert.ok(highlight('call helper').includes('class="t-symbol" data-ref='));
+assert.ok(!highlight('# call print').includes('t-builtin'));
+assert.ok(!highlight('call helper, string "call print"').includes('t-builtin'));
 assert.deepEqual(refs('# .func fake v0 @x'), []);
 assert.equal(JSON.stringify(functionScopes('.func one : int\nret v0\n.func two : int\nret v0')),
   JSON.stringify(['one', 'one', 'two', 'two']));

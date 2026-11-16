@@ -1,0 +1,18 @@
+# Guide primers and traps: each string operand owns its buffer.
+# Expected: folded/forwarded strings reach several uses without double-free.
+# The unused concat also needs freeing; escaped characters must round-trip.
+# Leak/fault proof still requires the C harness and a memory checker.
+.entrypoint main
+
+.func main : unit
+.local @text : string
+.entry 0
+
+.block 0
+  v0 : string = concat string "line\n", string "\"quoted\"\\tail"
+  store @text v0
+  v1 : string = load @text
+  v2 : string = concat v1, string "!"
+  call print, v0, v0, v1, v2
+  v3 : string = concat string "not ", string "used"
+  ret unit

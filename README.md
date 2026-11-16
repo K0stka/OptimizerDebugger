@@ -21,9 +21,12 @@ Then open http://127.0.0.1:8080.
 - The current IR is stored in the browser's local storage and survives reloads.
 - Input edits automatically run the optimizer after a short pause.
 - Web optimizer runs enable `--verbose` and show DEBUG output in the diagnostics drawer.
-- Hover values, slots, block targets, or function names to highlight matching
-  references across both panes. Local identifiers are scoped to their function.
+- Hover values, slots, block targets, or user-defined function names to highlight
+  matching references across both panes. Local identifiers are scoped to their
+  function. Built-in calls have distinct syntax coloring and no linked hover.
 - Presets live in `presets/*.ir`.
+- [Guide examples](presets/GUIDE.md) cover every step of
+  [the optimizer tutorial](https://optimizer.krychlic.com/), with additional edge cases.
 
 ## The ifj26-opt tool (CLI)
 
@@ -46,6 +49,15 @@ Symbol highlighting checks: `node tests/highlighting.cjs`.
 
 CLI overrides: `--repo <path>`, `--port <n>`; `make opt` runs
 `server --build-only` (compiles both flavors, no server).
+
+Optimizer requests time out after 5 seconds; each compiler/linker command has a
+60-second limit. Timed-out process trees are terminated and the UI reports an
+error. Client socket reads and writes have 10-second timeouts.
+
+Process timeout checks on Windows:
+
+    clang -std=c17 -O2 -D_CRT_SECURE_NO_WARNINGS tests/process_timeouts.c -o build/process-timeouts.exe -lws2_32
+    build/process-timeouts.exe
 
 ## The textual IR format
 
@@ -71,7 +83,7 @@ Defined by `opt_src/ir_text.c` (printer + parser over the repository's public
 Types: `int | double | string | bool | unit`. Operands: `v<id>`, `int 5`,
 `double 1.5`, `string "..."` (escapes `\\ \" \n \t \r \xHH`), `bool true`,
 `unit`. Value ids may have gaps (post-optimization output re-parses; ids are
-remapped to sequential on parse).
+preserved on parse).
 
 ## Layout
 

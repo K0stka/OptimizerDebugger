@@ -1,0 +1,47 @@
+# Guide step 8: absorb NOT into a branch by swapping its targets.
+# Expected: choose loses both NOTs; two swaps preserve its original targets.
+# shared keeps its NOT because print still uses it, even after branch rewriting.
+.entrypoint main
+
+.func main : unit
+.entry 0
+
+.block 0
+  v0 : bool = call readBool
+  call choose, v0
+  call shared, v0
+  ret unit
+
+.func choose : unit
+.param @condition : bool
+.entry 0
+
+.block 0
+  v0 : bool = load @condition
+  v1 : bool = not v0
+  v2 : bool = not v1
+  branch v2 ? 1 : 2
+
+.block 1
+  call print, string "true"
+  ret unit
+
+.block 2
+  call print, string "false"
+  ret unit
+
+.func shared : unit
+.param @condition : bool
+.entry 0
+
+.block 0
+  v0 : bool = load @condition
+  v1 : bool = not v0
+  call print, v1
+  branch v1 ? 1 : 2
+
+.block 1
+  ret unit
+
+.block 2
+  ret unit

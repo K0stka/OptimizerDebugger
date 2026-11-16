@@ -1,0 +1,29 @@
+# Guide trap: reset forwarding knowledge at every block boundary.
+# Expected in the tutorial pipeline: the header loads and slot stores survive.
+# Replacing the header load by either 0 or the body's latest value is wrong.
+# A future dataflow pass may optimize this only after reasoning about the loop.
+.entrypoint main
+
+.func main : unit
+.local @count : int
+.entry 0
+
+.block 0
+  store @count int 0
+  jump 1
+
+.block 1
+  v0 : int = load @count
+  v1 : bool = lt v0, int 3
+  branch v1 ? 2 : 3
+
+.block 2
+  call print, v0
+  v2 : int = add v0, int 1
+  store @count v2
+  jump 1
+
+.block 3
+  v3 : int = load @count
+  call print, v3
+  ret unit

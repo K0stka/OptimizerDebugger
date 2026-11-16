@@ -1,0 +1,7 @@
+# Step 2 negative case: v99 has no definition. The text parser rejects it.
+.entrypoint main
+.func main : unit
+.entry 0
+.block 0
+  call print, v99
+  ret unit

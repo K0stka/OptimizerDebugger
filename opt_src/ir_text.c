@@ -15,7 +15,7 @@
  * .entry <block-id>                # function entrypoint (defaults to 0)
  *
  * .block <id>                      # block ids are sequential from 0
- *   v<id> : <type> = add v0, int 2 # value definitions are sequential
+ *   v<id> : <type> = add v0, int 2 # value ids may have gaps
  *   store @i v0
  *   branch v0 ? 1 : 2              # exactly one terminator per block, last
  * @endcode
@@ -39,7 +39,7 @@
  * readInt, readBoolean, readDouble, toInt, toStr, strLen, strSub, ord, chr),
  * then to user functions defined by @c .func. Slot names must be declared
  * before use. Value ids may contain gaps (e.g. after optimization); they are
- * remapped to sequential ids on parse, so printed output always re-parses.
+ * preserved on parse, so printed output keeps the supplied identifiers.
  */
 
 #include "ir_text.h"
@@ -933,7 +933,7 @@ typedef struct {
 } FnState;
 
 /**
- * @brief Assigns the next sequential id to a defined value token
+ * @brief Preserves a defined value token and records it for reference validation
  */
 static bool vmap_assign(Parser* parser, FnState* fx, size_t token, size_t mapped) {
   if (token > MAX_TOKEN_ID) {
@@ -962,7 +962,12 @@ static bool vmap_assign(Parser* parser, FnState* fx, size_t token, size_t mapped
     return false;
   }
 
-  fx->vmap[token] = mapped;
+  IrFunction* function = &parser->ctx->ir.functions.data[fx->fid];
+  IrBlock* block = &function->blocks.data[fx->block_count - 1];
+  block->instructions.data[block->instructions.count - 1].result = token;
+  // Undo the constructor's automatic id allocation, then reserve the textual id.
+  function->value_count = mapped > token ? mapped : token + 1;
+  fx->vmap[token] = token;
   return true;
 }
 
@@ -1005,7 +1010,7 @@ static bool remap_operand(Parser* parser, FnState* fx, IrOperand* operand,
 /**
  * @brief Validates and finalizes a function after its lines were parsed
  *
- * Remaps value references to sequential ids, validates block targets and the
+ * Validates value references, block targets and the
  * entrypoint, and releases the per-function state. Reports errors without line
  * numbers (the line context is already gone); call with current_line = 0.
  */

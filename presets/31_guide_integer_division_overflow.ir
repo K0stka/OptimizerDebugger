@@ -1,0 +1,12 @@
+# Guide trap: INT32_MIN / -1 is not a representable int32 constant.
+# Expected: leave IDIV for the runtime instead of overflowing during folding.
+# This can reproduce a crash in a compiler that lacks the folding guard.
+.entrypoint main
+
+.func main : unit
+.entry 0
+
+.block 0
+  v0 : int = idiv int -2147483648, int -1
+  call print, v0
+  ret unit

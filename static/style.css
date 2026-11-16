@@ -361,6 +361,7 @@ textarea,
 .t-type { color: #ff7b72; }
 .t-number { color: #f2cc60; }
 .t-symbol[data-ref] { color: #b6d8ee; }
+.t-builtin { color: #c4b5fd; }
 [data-ref] { border-radius: 2px; }
 .ref-highlight {
   background: #6de0c22b;

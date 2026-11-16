@@ -1,0 +1,52 @@
+# Guide step 14: call-graph reachability and function-id remapping.
+# Expected: orphanA/orphanB disappear despite calling each other.
+# main, countdown, and report stay; the recursive and forward calls stay valid.
+.entrypoint main
+
+.func orphanA : unit
+.entry 0
+
+.block 0
+  call orphanB
+  ret unit
+
+.func main : unit
+.entry 0
+
+.block 0
+  v0 : int = call countdown, int 3
+  call report, v0
+  ret unit
+
+.func orphanB : unit
+.entry 0
+
+.block 0
+  call orphanA
+  ret unit
+
+.func countdown : int
+.param @n : int
+.entry 0
+
+.block 0
+  v0 : int = load @n
+  v1 : bool = le v0, int 0
+  branch v1 ? 1 : 2
+
+.block 1
+  ret int 0
+
+.block 2
+  v2 : int = sub v0, int 1
+  v3 : int = call countdown, v2
+  ret v3
+
+.func report : unit
+.param @value : int
+.entry 0
+
+.block 0
+  v0 : int = load @value
+  call print, v0
+  ret unit

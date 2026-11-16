@@ -87,6 +87,16 @@ function syncInputHighlightScroll() {
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ESCAPES[c]);
 
+// Keep in sync with BUILTIN_NAMES in opt_src/ir_text.c.
+const BUILTIN_FUNCTIONS = new Set([
+  'print', 'readLine', 'readInt', 'readBool', 'readDouble', 'toInt',
+  'toStr', 'strLen', 'strSub', 'ord', 'chr',
+]);
+
+function isBuiltinCall(source, token, index) {
+  return BUILTIN_FUNCTIONS.has(token) && /\bcall\s+$/.test(source.slice(0, index));
+}
+
 const HIGHLIGHT_RE = new RegExp(
   [
     '(#.*$)', // 1 comment
@@ -107,7 +117,7 @@ const HIGHLIGHT_RE = new RegExp(
 function referenceKey(source, token, index, scope) {
   const prefix = source.slice(0, index);
   if (/^\s*(?:\.func|\.entrypoint)\s+$|\bcall\s+$/.test(prefix))
-    return `function:${token}`;
+    return isBuiltinCall(source, token, index) ? null : `function:${token}`;
   if (/^@[A-Za-z0-9_]+$/.test(token)) return `slot:${scope}:${token}`;
   if (/^v\d+$/.test(token)) return `value:${scope}:${token}`;
   if (/^\d+$/.test(token) &&
@@ -136,6 +146,7 @@ function highlight(source, scope = '') {
     const cls = comment ? 't-comment'
       : str ? 't-string'
       : dir ? 't-directive'
+      : isBuiltinCall(source, full, match.index) ? 't-builtin'
       : slot ? 't-slot'
       : value ? 't-value'
       : op ? 't-opcode'

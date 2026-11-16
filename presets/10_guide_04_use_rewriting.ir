@@ -1,0 +1,42 @@
+# Guide step 4: a folded definition feeds every operand shape.
+# Expected: 42 reaches unary/binary operations, a store, call arguments,
+# and the return; true reaches a branch; 0 reaches an exit code.
+# Strings have multiple consumers to exercise per-use ownership.
+.entrypoint main
+
+.func main : unit
+.local @answer : int
+.entry 0
+
+.block 0
+  v0 : int = add int 40, int 2
+  store @answer v0
+  v1 : double = int2double v0
+  v2 : int = mul v0, int 2
+  v3 : bool = eq v2, int 84
+  v4 : string = concat string "an", string "swer"
+  call print, v0, v1, v2, v4, v4
+  v5 : int = call answer
+  call print, v5
+  branch v3 ? 1 : 2
+
+.block 1
+  call finish
+  ret unit
+
+.block 2
+  exit int 1
+
+.func answer : int
+.entry 0
+
+.block 0
+  v0 : int = add int 40, int 2
+  ret v0
+
+.func finish : unit
+.entry 0
+
+.block 0
+  v0 : int = sub int 7, int 7
+  exit v0

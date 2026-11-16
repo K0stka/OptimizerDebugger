@@ -7,6 +7,7 @@
 # ---------------------------------------------------------------------------
 # Identities and calls that fold today.
 # ---------------------------------------------------------------------------
+
 .func helper : int
 .param @n : int
 .entry 0
@@ -34,6 +35,7 @@
 # ---------------------------------------------------------------------------
 # Branch folding: constant conditions and same-target branches.
 # ---------------------------------------------------------------------------
+
 .func branches : unit
 .local @x : int
 .entry 0
@@ -42,22 +44,28 @@
   v0 : int = load @x
   v1 : bool = lt int 5, int 1    # folds to bool false
   branch v1 ? 1 : 2              # folds to jump 2 (false target)
+
 .block 1
   call print, string "never"
   ret unit
+
 .block 2
   branch v0 ? 3 : 3              # same targets -> jump 3 (even for a value condition)
+
 .block 3
   v2 : bool = gt int 2, int 1    # folds to bool true
   branch v2 ? 4 : 5              # folds to jump 4 (true target)
+
 .block 4
   exit int 0
+
 .block 5
   exit int 1
 
 # ---------------------------------------------------------------------------
 # Constants, doubles, strings, comparisons, propagation through stores.
 # ---------------------------------------------------------------------------
+
 .func folds : unit
 .local @a : int
 .local @d : double
@@ -113,9 +121,11 @@
 
   # Branch on a folded constant condition:
   branch v18 ? 1 : 2
+
 .block 1
   call print, string "taken"
   ret unit
+
 .block 2
   call print, string "not taken"
   ret unit
@@ -125,6 +135,7 @@
 # which needs value replacement. These currently CRASH - included on purpose,
 # the error must be fixed in the optimizer (see the diagnostics drawer).
 # ---------------------------------------------------------------------------
+
 .func value_identities : int
 .local @x : int
 .local @s : string
@@ -145,6 +156,7 @@
 # ---------------------------------------------------------------------------
 # main: calls across functions, call-argument propagation.
 # ---------------------------------------------------------------------------
+
 .func main : unit
 .local @sum : int
 .entry 0

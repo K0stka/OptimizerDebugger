@@ -1,0 +1,35 @@
+# Guide trap: an infinite loop is observable behavior, not removable scaffolding.
+# Expected: self_loop keeps a self-jump; two_cycle remains non-terminating.
+# Jump threading must terminate while inspecting both shapes.
+# The debugger does not execute the calls below.
+.entrypoint main
+
+.func main : unit
+.entry 0
+
+.block 0
+  v0 : bool = call readBool
+  branch v0 ? 1 : 2
+
+.block 1
+  call self_loop
+  ret unit
+
+.block 2
+  call two_cycle
+  ret unit
+
+.func self_loop : unit
+.entry 0
+
+.block 0
+  jump 0
+
+.func two_cycle : unit
+.entry 0
+
+.block 0
+  jump 1
+
+.block 1
+  jump 0

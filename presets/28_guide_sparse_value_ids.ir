@@ -1,0 +1,25 @@
+# Guide trap: removing instructions leaves holes in internal value ids.
+# Expected: dead computations disappear; print and return still reference a load.
+# Text ids deliberately have gaps; the parser preserves them.
+# DCE then creates new gaps, which codegen must tolerate without renumbering.
+.entrypoint main
+
+.func main : unit
+.entry 0
+
+.block 0
+  v10 : int = call readInt
+  call keep, v10
+  ret unit
+
+.func keep : int
+.param @input : int
+.entry 0
+
+.block 0
+  v10 : int = load @input
+  v20 : int = add v10, int 8
+  v30 : int = mul v20, int 9
+  v40 : int = load @input
+  call print, v40
+  ret v40

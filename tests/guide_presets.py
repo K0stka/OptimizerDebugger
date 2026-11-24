@@ -75,6 +75,32 @@ ret v42
     code, duplicate = invoke(binary, sparse.replace(b"v7 :", b"v50 :"))
     assert code != 0 and "defined twice" in duplicate.get("error", ""), duplicate
 
+    wide = b""".func main : unit
+.block 0
+call print, int -9223372036854775808, int 9223372036854775807
+ret unit
+"""
+    code, parsed = invoke(binary, wide)
+    assert code == 0 and parsed.get("ok"), parsed
+    assert "int -9223372036854775808, int 9223372036854775807" in parsed["ir"], parsed
+    for value in (b"-9223372036854775809", b"9223372036854775808"):
+        code, result = invoke(binary, wide.replace(b"int 9223372036854775807", b"int " + value))
+        assert code != 0 and "signed 64-bit range" in result.get("error", ""), result
+
+    calls = b""".func main : unit
+.block 0
+v0 : bool = call readBool
+v1 : int = call strLen, string "text"
+v2 : string = call strSub, string "text", int 0, int 1
+call print, v0, v1, v2
+ret unit
+"""
+    code, parsed = invoke(binary, calls)
+    assert code == 0 and parsed.get("ok"), parsed
+    for name in ("readBoolean", "strLength", "subStr"):
+        assert f"call {name}" in parsed["ir"], parsed
+    assert invoke(binary, parsed["ir"].encode()) == (0, parsed)
+
     invalid_cases = {
         "invalid_block_target.ir": "undefined block",
         "invalid_value.ir": "undefined value",

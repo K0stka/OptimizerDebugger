@@ -30,8 +30,8 @@ assert.deepEqual(refs('v0 : int = call helper, int 21'),
 assert.deepEqual(refs('call helper', 'main'), refs('.func helper : int', 'helper'));
 assert.deepEqual(refs('.entrypoint helper'), ['function:helper']);
 assert.deepEqual(refs('call print, string "v0 @x jump 2" # v1 @y'), []);
-const builtins = ['print', 'readLine', 'readInt', 'readBool', 'readDouble',
-  'toInt', 'toStr', 'strLen', 'strSub', 'ord', 'chr'];
+const builtins = ['print', 'readLine', 'readInt', 'readBoolean', 'readDouble',
+  'toInt', 'toStr', 'strLength', 'subStr', 'ord', 'chr', 'readBool', 'strLen', 'strSub'];
 for (const name of builtins) {
   assert.deepEqual(refs(`call ${name}, v0`), ['value:main:v0']);
   assert.deepEqual(refs(`v1 : int = call ${name}, v0`),

@@ -80,10 +80,15 @@ Defined by `opt_src/ir_text.c` (printer + parser over the repository's public
     .block 1
       jump 0
 
-Types: `int | double | string | bool | unit`. Operands: `v<id>`, `int 5`,
+Types: `int | double | string | bool | unit`. Integer literals use the compiler IR's
+signed 64-bit range. Operands: `v<id>`, `int 5`,
 `double 1.5`, `string "..."` (escapes `\\ \" \n \t \r \xHH`), `bool true`,
 `unit`. Value ids may have gaps (post-optimization output re-parses; ids are
 preserved on parse).
+
+Built-in calls use the compiler's spellings, including `readBoolean`,
+`strLength`, and `subStr`. Saved IR using `readBool`, `strLen`, or `strSub`
+still parses.
 
 ## Layout
 

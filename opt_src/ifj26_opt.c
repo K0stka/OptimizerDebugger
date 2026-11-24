@@ -18,7 +18,6 @@
 #include "ir_text.h"    // ir_text_parse, ir_text_print
 #include "optimizer.h"  // optimize_ir
 
-#include <setjmp.h>   // setjmp, longjmp (through ctx.h)
 #include <stdbool.h>  // bool
 #include <stddef.h>   // size_t
 #include <stdio.h>    // printf, fprintf, fread, stdin, stdout, stderr
@@ -30,11 +29,9 @@
 #include <io.h>     // _setmode, _fileno
 #endif
 
-// Static to survive long jumps; referenced from the error path
 static bool g_plain = false;    // --plain: raw IR instead of a JSON envelope
 static bool g_no_opt = false;   // --no-opt: parse + print without optimizing
 static bool g_verbose = false;  // --verbose: enable compiler debug output
-static char* g_input = NULL;    // Whole IR text read from stdin
 
 /**
  * @brief Prints the CLI usage information to stderr
@@ -138,6 +135,54 @@ static size_t count_instructions(Ctx* ctx) {
 }
 
 /**
+ * @brief Parses, optionally optimizes, and prints textual IR
+ */
+static int run_optimizer(Ctx* ctx, const char* input) {
+  ctx_allocate(ctx);
+
+  // Parse the textual IR
+  char error[256];
+  if (!ir_text_parse(ctx, input, error, sizeof(error))) {
+    if (g_plain)
+      fprintf(stderr, "error: %s\n", error);
+    else {
+      printf("{\"ok\":false,\"error\":");
+      json_print_string(error);
+      printf("}\n");
+    }
+    return 1;
+  }
+
+  // Run the optimizer (unless disabled for round-trip checking)
+  size_t instructions_before = count_instructions(ctx);
+  if (!g_no_opt)
+    optimize_ir(ctx);
+  size_t instructions_after = count_instructions(ctx);
+
+  // Print the optimized IR
+  char* text = ir_text_print(ctx);
+  if (text == NULL) {
+    if (g_plain)
+      fprintf(stderr, "error: out of memory while printing\n");
+    else
+      printf("{\"ok\":false,\"error\":\"out of memory while printing\"}\n");
+    return 99;
+  }
+
+  if (g_plain) {
+    fputs(text, stdout);
+  } else {
+    printf("{\"ok\":true,\"ir\":");
+    json_print_string(text);
+    printf(",\"stats\":{\"instructions_before\":%zu,\"instructions_after\":%zu}}\n",
+           instructions_before, instructions_after);
+  }
+
+  free(text);
+  return (int)ctx->exit_code;
+}
+
+/**
  * @brief Entrypoint of the ifj26-opt tool
  */
 int main(int argc, char** argv) {
@@ -147,7 +192,6 @@ int main(int argc, char** argv) {
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
-  // Parse the tool's own CLI flags
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--plain") == 0)
       g_plain = true;
@@ -162,77 +206,30 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Read the IR text from stdin before touching the compiler context
   size_t input_len = 0;
-  g_input = read_all_stdin(&input_len);
-  if (g_input == NULL) {
+  char* input = read_all_stdin(&input_len);
+  if (input == NULL) {
     fprintf(stderr, "error: out of memory while reading stdin\n");
-    return 99;
+    return E_INTERNAL_ERROR;
   }
 
-  // Initialize shared memory and error context (same pattern as ifj26.c)
-  static Ctx context;  // Static to survive long jump
+  static Ctx context;  // Static to survive long jumps
+  Ctx* ctx = &context;
   Flags flags = DEFAULT_FLAGS;
   flags.verbose = g_verbose;
-  ctx_init(&context, flags);
+  ctx_init(ctx, flags);
 
-  // If an error is thrown at any point (allocation failure inside the parser,
-  // optimizer or printer), print the envelope and exit with the thrown code
-  int jump_result = setjmp(context.error_target);
-  if (jump_result != 0) {
-    int code = (int)context.exit_code;
+  int code;
+  TRY {
+    code = run_optimizer(ctx, input);
+  }
+  CATCH {
+    code = ctx->exit_code != E_OK ? (int)ctx->exit_code : E_INTERNAL_ERROR;
     if (!g_plain)
       printf("{\"ok\":false,\"error\":\"internal error (exit code %d)\"}\n", code);
-    free(g_input);
-    ctx_free(&context);
-    return code != 0 ? code : 99;
   }
 
-  ctx_allocate(&context);
-
-  // Parse the textual IR
-  char error[256];
-  if (!ir_text_parse(&context, g_input, error, sizeof(error))) {
-    if (g_plain)
-      fprintf(stderr, "error: %s\n", error);
-    else {
-      printf("{\"ok\":false,\"error\":");
-      json_print_string(error);
-      printf("}\n");
-    }
-    free(g_input);
-    ctx_free(&context);
-    return 1;
-  }
-
-  // Run the optimizer (unless disabled for round-trip checking)
-  size_t instructions_before = count_instructions(&context);
-  if (!g_no_opt)
-    optimize_ir(&context);
-  size_t instructions_after = count_instructions(&context);
-
-  // Print the optimized IR
-  char* text = ir_text_print(&context);
-  if (text == NULL) {
-    if (g_plain)
-      fprintf(stderr, "error: out of memory while printing\n");
-    else
-      printf("{\"ok\":false,\"error\":\"out of memory while printing\"}\n");
-    free(g_input);
-    ctx_free(&context);
-    return 99;
-  }
-
-  if (g_plain) {
-    fputs(text, stdout);
-  } else {
-    printf("{\"ok\":true,\"ir\":");
-    json_print_string(text);
-    printf(",\"stats\":{\"instructions_before\":%zu,\"instructions_after\":%zu}}\n",
-           instructions_before, instructions_after);
-  }
-
-  free(text);
-  free(g_input);
-  return (int)ctx_free(&context);
+  free(input);
+  ctx_free(ctx);
+  return code;
 }

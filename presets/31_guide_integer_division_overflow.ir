@@ -1,6 +1,6 @@
 # Guide trap: INT32_MIN / -1 is not a representable int32 constant.
 # Expected: leave IDIV for the runtime instead of overflowing during folding.
-# This can reproduce a crash in a compiler that lacks the folding guard.
+# The current compiler's 64-bit IR can represent the folded result, 2147483648.
 .entrypoint main
 
 .func main : unit

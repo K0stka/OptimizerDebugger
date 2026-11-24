@@ -87,10 +87,11 @@ function syncInputHighlightScroll() {
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ESCAPES[c]);
 
-// Keep in sync with BUILTIN_NAMES in opt_src/ir_text.c.
+// Keep in sync with BUILTIN_NAMES and BUILTIN_ALIASES in opt_src/ir_text.c.
 const BUILTIN_FUNCTIONS = new Set([
-  'print', 'readLine', 'readInt', 'readBool', 'readDouble', 'toInt',
-  'toStr', 'strLen', 'strSub', 'ord', 'chr',
+  'print', 'readLine', 'readInt', 'readBoolean', 'readDouble', 'toInt',
+  'toStr', 'strLength', 'subStr', 'ord', 'chr',
+  'readBool', 'strLen', 'strSub',
 ]);
 
 function isBuiltinCall(source, token, index) {

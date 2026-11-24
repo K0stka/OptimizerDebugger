@@ -22,7 +22,7 @@
  *
  * Types: @c int | @c double | @c string | @c bool | @c unit
  *
- * Operands: @c v<id> | @c int <i32> | @c double <x> | @c string "..." |
+ * Operands: @c v<id> | @c int <i64> | @c double <x> | @c string "..." |
  * @c bool true|false | @c unit
  *
  * Instructions (form depends on class):
@@ -36,7 +36,7 @@
  * @c ret <op> | @c exit <op>
  *
  * Function names in @c call resolve to built-ins first (print, readLine,
- * readInt, readBoolean, readDouble, toInt, toStr, strLen, strSub, ord, chr),
+ * readInt, readBoolean, readDouble, toInt, toStr, strLength, subStr, ord, chr),
  * then to user functions defined by @c .func. Slot names must be declared
  * before use. Value ids may contain gaps (e.g. after optimization); they are
  * preserved on parse, so printed output keeps the supplied identifiers.
@@ -47,9 +47,11 @@
 #include "ir_helpers.h"  // ir_add_* constructors, ir_get_instruction_class
 
 #include <ctype.h>    // isalpha, isalnum, isdigit, isxdigit, tolower
+#include <errno.h>    // errno, ERANGE
+#include <inttypes.h> // PRId64, strtoimax
 #include <stdarg.h>   // va_list, va_start, va_end
 #include <stdbool.h>  // bool
-#include <stdint.h>   // SIZE_MAX, INT32_MIN, INT32_MAX
+#include <stdint.h>   // SIZE_MAX, INT64_MIN, INT64_MAX
 #include <stdio.h>    // vsnprintf, snprintf
 #include <stdlib.h>   // malloc, realloc, free, strtol, strtod
 #include <string.h>   // strlen, memcpy, strncmp, strcmp
@@ -192,8 +194,27 @@ static bool ir_type_parse(const char* word, size_t len, IrType* out) {
  * @brief Names of the built-in functions, indexed by (IrFunctionType - IR_FX_PRINT)
  */
 static const char* const BUILTIN_NAMES[] = {
-    "print",   "readLine", "readInt",  "readBool", "readDouble", "toInt",
-    "toStr",   "strLen",   "strSub",   "ord",      "chr",
+    [IR_FX_PRINT - IR_FX_PRINT] = "print",
+    [IR_FX_READ_LINE - IR_FX_PRINT] = "readLine",
+    [IR_FX_READ_INT - IR_FX_PRINT] = "readInt",
+    [IR_FX_READ_BOOL - IR_FX_PRINT] = "readBoolean",
+    [IR_FX_READ_DOUBLE - IR_FX_PRINT] = "readDouble",
+    [IR_FX_TO_INT - IR_FX_PRINT] = "toInt",
+    [IR_FX_TO_STR - IR_FX_PRINT] = "toStr",
+    [IR_FX_STR_LEN - IR_FX_PRINT] = "strLength",
+    [IR_FX_STR_SUB - IR_FX_PRINT] = "subStr",
+    [IR_FX_ORD - IR_FX_PRINT] = "ord",
+    [IR_FX_CHR - IR_FX_PRINT] = "chr",
+};
+
+// Keep accepting spellings from previously saved IR.
+static const struct {
+  const char* name;
+  IrFunctionType type;
+} BUILTIN_ALIASES[] = {
+    {"readBool", IR_FX_READ_BOOL},
+    {"strLen", IR_FX_STR_LEN},
+    {"strSub", IR_FX_STR_SUB},
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -262,7 +283,7 @@ static bool print_operand(TextBuf* buf, const IrOperand* operand) {
     case IR_OP_VALUE:
       return buf_printf(buf, "v%zu", operand->value.id);
     case IR_OP_INT32:
-      return buf_printf(buf, "int %d", operand->value.int32_value);
+      return buf_printf(buf, "int %" PRId64, operand->value.int32_value);
     case IR_OP_DOUBLE:
       if (!buf_puts(buf, "double "))
         return false;
@@ -301,7 +322,8 @@ static const char* call_function_name(Ctx* ctx, const IrInstruction* inst) {
   }
 
   size_t index = (size_t)inst->operands.call.type - (size_t)IR_FX_PRINT;
-  if (index < sizeof(BUILTIN_NAMES) / sizeof(BUILTIN_NAMES[0]))
+  if (index < sizeof(BUILTIN_NAMES) / sizeof(BUILTIN_NAMES[0]) &&
+      BUILTIN_NAMES[index] != NULL)
     return BUILTIN_NAMES[index];
   return "?builtin";
 }
@@ -472,7 +494,7 @@ fail:
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Parser
+// Text parser
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -490,7 +512,7 @@ typedef struct {
   IrFunctionId* fnames_ids;
   size_t function_count;
   size_t fnames_capacity;
-} Parser;
+} IrTextParser;
 
 /**
  * @brief One meaningful (non-empty, comment-stripped) source line
@@ -503,7 +525,7 @@ typedef struct {
 /**
  * @brief Records a parse error (first error wins)
  */
-static void parse_fail(Parser* parser, const char* format, ...) {
+static void parse_fail(IrTextParser* parser, const char* format, ...) {
   if (parser->failed)
     return;
   parser->failed = true;
@@ -594,7 +616,7 @@ static bool scan_id(Scan* scan, size_t* out) {
 /**
  * @brief Verifies the scanner reached the end of the line
  */
-static bool scan_end(Parser* parser, Scan* scan) {
+static bool scan_end(IrTextParser* parser, Scan* scan) {
   scan_ws(scan);
   if (*scan->p != '\0') {
     parse_fail(parser, "unexpected characters at end of line");
@@ -609,7 +631,7 @@ static bool scan_end(Parser* parser, Scan* scan) {
  * Supported escapes: \\ \" \n \t \r \xHH. The result is a freshly allocated
  * NUL-terminated string owned by the caller.
  */
-static bool scan_string(Parser* parser, Scan* scan, char** out) {
+static bool scan_string(IrTextParser* parser, Scan* scan, char** out) {
   scan_ws(scan);
   if (*scan->p != '"') {
     parse_fail(parser, "expected string literal");
@@ -721,7 +743,7 @@ static void free_operand(IrOperand* operand) {
 /**
  * @brief Parses one operand; value references are stored unresolved
  */
-static bool parse_operand(Parser* parser, Scan* scan, IrOperand* out) {
+static bool parse_operand(IrTextParser* parser, Scan* scan, IrOperand* out) {
   scan_ws(scan);
 
   // Value reference
@@ -748,14 +770,15 @@ static bool parse_operand(Parser* parser, Scan* scan, IrOperand* out) {
   if (word_is(word, len, "int")) {
     scan_ws(scan);
     char* end = NULL;
-    long value = strtol(scan->p, &end, 10);
+    errno = 0;
+    intmax_t value = strtoimax(scan->p, &end, 10);
     if (end == scan->p ||
         (*end != '\0' && *end != ' ' && *end != '\t' && *end != ',')) {
       parse_fail(parser, "expected an integer literal after 'int'");
       return false;
     }
-    if (value < INT32_MIN || value > INT32_MAX) {
-      parse_fail(parser, "integer literal out of the 32-bit range: %ld", value);
+    if (errno == ERANGE || value < INT64_MIN || value > INT64_MAX) {
+      parse_fail(parser, "integer literal out of the signed 64-bit range");
       return false;
     }
     scan->p = end;
@@ -813,7 +836,7 @@ static bool parse_operand(Parser* parser, Scan* scan, IrOperand* out) {
 /**
  * @brief Parses an IrType word
  */
-static bool parse_type(Parser* parser, Scan* scan, IrType* out) {
+static bool parse_type(IrTextParser* parser, Scan* scan, IrType* out) {
   const char* word;
   size_t len;
   if (!scan_word(scan, &word, &len) || !ir_type_parse(word, len, out)) {
@@ -826,7 +849,7 @@ static bool parse_type(Parser* parser, Scan* scan, IrType* out) {
 /**
  * @brief Parses a function name
  */
-static bool parse_name(Parser* parser, Scan* scan, const char** name, size_t* len) {
+static bool parse_name(IrTextParser* parser, Scan* scan, const char** name, size_t* len) {
   if (!scan_word(scan, name, len)) {
     parse_fail(parser, "expected a name");
     return false;
@@ -837,7 +860,7 @@ static bool parse_name(Parser* parser, Scan* scan, const char** name, size_t* le
 /**
  * @brief Parses a free function header: name : return-type
  */
-static bool parse_func_header(Parser* parser, Scan* scan, const char** name,
+static bool parse_func_header(IrTextParser* parser, Scan* scan, const char** name,
                               size_t* name_len, IrType* return_type) {
   if (!parse_name(parser, scan, name, name_len))
     return false;
@@ -887,13 +910,21 @@ static bool parse_unary_opcode(const char* word, size_t len, IrInstructionType* 
 /**
  * @brief Resolves a function name to a builtin type or user function id
  */
-static bool resolve_function(Parser* parser, const char* name, size_t len,
+static bool resolve_function(IrTextParser* parser, const char* name, size_t len,
                              IrFunctionType* type_out, IrFunctionId* id_out) {
   // Builtins first
   size_t builtin_count = sizeof(BUILTIN_NAMES) / sizeof(BUILTIN_NAMES[0]);
   for (size_t i = 0; i < builtin_count; i++) {
-    if (word_is(name, len, BUILTIN_NAMES[i])) {
+    if (BUILTIN_NAMES[i] != NULL && word_is(name, len, BUILTIN_NAMES[i])) {
       *type_out = (IrFunctionType)((size_t)IR_FX_PRINT + i);
+      *id_out = IR_INVALID_ID;
+      return true;
+    }
+  }
+
+  for (size_t i = 0; i < sizeof(BUILTIN_ALIASES) / sizeof(BUILTIN_ALIASES[0]); i++) {
+    if (word_is(name, len, BUILTIN_ALIASES[i].name)) {
+      *type_out = BUILTIN_ALIASES[i].type;
       *id_out = IR_INVALID_ID;
       return true;
     }
@@ -935,7 +966,7 @@ typedef struct {
 /**
  * @brief Preserves a defined value token and records it for reference validation
  */
-static bool vmap_assign(Parser* parser, FnState* fx, size_t token, size_t mapped) {
+static bool vmap_assign(IrTextParser* parser, FnState* fx, size_t token, size_t mapped) {
   if (token > MAX_TOKEN_ID) {
     parse_fail(parser, "value id v%zu is too large", token);
     return false;
@@ -974,7 +1005,7 @@ static bool vmap_assign(Parser* parser, FnState* fx, size_t token, size_t mapped
 /**
  * @brief Looks up a slot id by name (must be declared before use)
  */
-static bool slot_lookup(Parser* parser, FnState* fx, const char* name, size_t len,
+static bool slot_lookup(IrTextParser* parser, FnState* fx, const char* name, size_t len,
                         size_t* out) {
   for (size_t i = 0; i < fx->slot_count; i++) {
     if (word_is(name, len, fx->slot_names[i])) {
@@ -991,7 +1022,7 @@ static bool slot_lookup(Parser* parser, FnState* fx, const char* name, size_t le
 /**
  * @brief Remaps a value reference to its assigned id
  */
-static bool remap_operand(Parser* parser, FnState* fx, IrOperand* operand,
+static bool remap_operand(IrTextParser* parser, FnState* fx, IrOperand* operand,
                           const char* fx_name) {
   if (operand->type != IR_OP_VALUE)
     return true;
@@ -1014,7 +1045,7 @@ static bool remap_operand(Parser* parser, FnState* fx, IrOperand* operand,
  * entrypoint, and releases the per-function state. Reports errors without line
  * numbers (the line context is already gone); call with current_line = 0.
  */
-static bool finish_function(Parser* parser, FnState* fx) {
+static bool finish_function(IrTextParser* parser, FnState* fx) {
   bool ok = true;
 
   if (fx->active) {
@@ -1127,7 +1158,7 @@ static bool finish_function(Parser* parser, FnState* fx) {
 /**
  * @brief Registers a new block in the current function
  */
-static bool parse_block_directive(Parser* parser, FnState* fx, Scan* scan) {
+static bool parse_block_directive(IrTextParser* parser, FnState* fx, Scan* scan) {
   size_t id;
   if (!scan_id(scan, &id)) {
     parse_fail(parser, "expected a block id after '.block'");
@@ -1165,7 +1196,7 @@ static bool parse_block_directive(Parser* parser, FnState* fx, Scan* scan) {
 /**
  * @brief Registers the current slot name for later lookups
  */
-static bool slot_register(Parser* parser, FnState* fx, char* name) {
+static bool slot_register(IrTextParser* parser, FnState* fx, char* name) {
   if (fx->slot_count + 1 > fx->slot_capacity) {
     size_t capacity = fx->slot_capacity == 0 ? 8 : fx->slot_capacity * 2;
     const char** grown = realloc(fx->slot_names, capacity * sizeof(char*));
@@ -1183,7 +1214,7 @@ static bool slot_register(Parser* parser, FnState* fx, char* name) {
 /**
  * @brief Parses '.param' / '.local' slot declarations
  */
-static bool parse_slot_directive(Parser* parser, FnState* fx, Scan* scan, bool param) {
+static bool parse_slot_directive(IrTextParser* parser, FnState* fx, Scan* scan, bool param) {
   if (!fx->active) {
     parse_fail(parser, "'%s' outside of a function", param ? ".param" : ".local");
     return false;
@@ -1242,7 +1273,7 @@ static bool parse_slot_directive(Parser* parser, FnState* fx, Scan* scan, bool p
 /**
  * @brief Parses and adds one instruction line to the current block
  */
-static bool parse_instruction_line(Parser* parser, FnState* fx, Scan* scan) {
+static bool parse_instruction_line(IrTextParser* parser, FnState* fx, Scan* scan) {
   if (!fx->active || fx->block_count == 0) {
     parse_fail(parser, "instruction outside of a .block");
     return false;
@@ -1566,7 +1597,7 @@ static void strip_line(char* line) {
 /**
  * @brief Splits the text into meaningful lines (comments/blanks removed)
  */
-static bool prepare_lines(Parser* parser, const char* text, char** buffer_out,
+static bool prepare_lines(IrTextParser* parser, const char* text, char** buffer_out,
                           Line** lines_out, size_t* count_out) {
   size_t length = strlen(text);
   char* buffer = malloc(length + 2);
@@ -1626,7 +1657,7 @@ static bool prepare_lines(Parser* parser, const char* text, char** buffer_out,
 }
 
 bool ir_text_parse(Ctx* ctx, const char* text, char* error_buf, size_t error_size) {
-  Parser parser = {
+  IrTextParser parser = {
       .ctx = ctx,
       .error = error_buf,
       .error_size = error_size,

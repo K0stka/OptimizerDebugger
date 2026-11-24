@@ -87,9 +87,10 @@ A successful normal run alone does not prove failure cleanup or absence of leaks
 
 ### Observed with the configured compiler
 
-At creation time, all presets parse. Most missing passes simply leave their bait
-unchanged, including DCE, forwarding, dead stores, block cleanup, and unused functions.
-Integer overflow arithmetic currently folds to wrapped constants, unlike the
-guide's conservative rule. The `INT32_MIN / -1` example crashes the optimizer
-process on this Windows build; `--optimize` reports it as a failure. These examples
-remain as independent reproductions, without modifying the external compiler repo.
+With compiler commit `709f1e7`, all 25 guide presets optimize and their output
+reparses. The optimizer eliminates dead instructions and stores, forwards stored
+constants within blocks, removes unreachable blocks and functions, and threads
+jumps. The integer guard examples use the guide's 32-bit boundaries. The
+compiler's IR stores signed 64-bit integers, so the examples can fold past the
+32-bit bounds, including `INT32_MIN / -1` to `2147483648`. Division by zero
+remains in the IR.

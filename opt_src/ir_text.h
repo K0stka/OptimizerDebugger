@@ -36,8 +36,8 @@ char* ir_text_print(Ctx* ctx);
  * the input (e.g. after optimization); they are remapped to sequential ids, so
  * printed output always re-parses to an equivalent program.
  *
- * Does not validate types, builtin call arities or SSA dominance - only the
- * structural integrity of the format.
+ * Checks call arities and structural references. Full type checking and SSA
+ * dominance validation are outside the text format.
  *
  * @param[in,out] ctx Non-null pointer to an initialized context
  * @param[in] text NUL-terminated IR text to parse

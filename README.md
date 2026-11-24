@@ -75,7 +75,7 @@ Defined by `opt_src/ir_text.c` (printer + parser over the repository's public
       v0 : int = add int 2, int 3      # v<id> : <type> = <op> <operands>
       store @i v0                      # store @slot <operand>
       v1 : int = call helper, v0       # builtins by name, user fns by name
-      call print, v1                   # unit-returning calls have no v<id>
+      write v1                         # output instructions have no v<id>
       branch v1 ? 1 : 2                # exactly one terminator per block
     .block 1
       jump 0
@@ -86,9 +86,12 @@ signed 64-bit range. Operands: `v<id>`, `int 5`,
 `unit`. Value ids may have gaps (post-optimization output re-parses; ids are
 preserved on parse).
 
-Built-in calls use the compiler's spellings, including `readBoolean`,
-`strLength`, and `subStr`. Saved IR using `readBool`, `strLen`, or `strSub`
-still parses.
+Simple builtins print as `write`, `strlen`, `float2int`, `int2str`,
+`float2str`, and `bool2str`. Checked builtins such as `readBoolean` and
+`subStr` print as dedicated operations too. Saved checked builtin calls are accepted on input. Saved IR using `call print`, `call strLength`,
+`call toInt`, or `call toStr` is translated on input. Legacy `toStr`
+needs a literal or an already-defined value to select the conversion.
+The older names `readBool`, `strLen`, and `strSub` are accepted.
 
 ## Layout
 

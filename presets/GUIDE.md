@@ -25,6 +25,7 @@ decisions. Inspect emitted IFJcode26 for their effect.
 | Straight-line and CFG inlining | [inlining repeated effectful calls](48_inlining_repeated_effectful_calls.ir), [cfg inlining](51_cfg_inlining.ir) |
 | Loop-invariant motion | [loop invariant motion](50_loop_invariant_motion.ir) |
 | Storage reuse, direct startup, and fused branches in codegen | [codegen storage and branches](53_codegen_storage_and_branches.ir) |
+| Grouped literal output and a known fault | [grouped writes and known fault](54_grouped_writes_and_known_fault.ir) |
 
 ## Checks and format limits
 

@@ -1,7 +1,7 @@
 # IFJ26 Optimizer Debugger
 
 A standalone dev tool for the [IFJ26 compiler](../IFJ26): paste IR in a browser,
-see the optimized IR produced by the real `optimize_ir()` from the repository —
+see the optimized IR produced by the real `optimize_ir()` from the repository â€”
 automatically recompiled whenever the repository sources change.
 
 The IFJ26 repository is **never modified**: its `src/*.c` files are only read
@@ -14,7 +14,7 @@ and compiled into a separate `ifj26-opt` binary owned by this project.
 Then open http://127.0.0.1:8080.
 
 - The optimizer binary is rebuilt automatically whenever any file in
-  `<repo>/src` or `opt_src/` is newer than the binary — edit the optimizer,
+  `<repo>/src` or `opt_src/` is newer than the binary â€” edit the optimizer,
   save, press Optimize, and the fresh code runs. No server
   restart needed.
 - Hot reload reuses unchanged object files; header edits rebuild all sources.
@@ -23,16 +23,15 @@ Then open http://127.0.0.1:8080.
 - Web optimizer runs enable `--verbose` and show DEBUG output in the diagnostics drawer.
 - Hover values, slots, block targets, or user-defined function names to highlight
   matching references across both panes. Local identifiers are scoped to their
-  function. Built-in calls have distinct syntax coloring and no linked hover.
+  function. Lowered builtin operations have their own mnemonics.
 - Presets live in `presets/*.ir`.
-- [Guide examples](presets/GUIDE.md) cover every step of
-  [the optimizer tutorial](https://optimizer.krychlic.com/), with additional edge cases.
+- [Preset index](presets/GUIDE.md) describes the current optimizer examples.
 
 ## The ifj26-opt tool (CLI)
 
 The same binary the page uses is a normal CLI tool:
 
-    build/release/ifj26-opt --plain < presets/01_constant_folding.ir
+    build/release/ifj26-opt --plain < presets/32_constant_recursive_evaluation.ir
 
 It reads textual IR on stdin and writes a JSON envelope (or plain IR with
 `--plain`). `--no-opt` parses and prints without optimizing (round-trip

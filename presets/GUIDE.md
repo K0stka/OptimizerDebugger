@@ -1,55 +1,30 @@
-# Optimizer guide examples
+# Optimizer debugger presets
 
-These original examples follow [Build an In-Place IR Optimizer, Step by Step](https://optimizer.krychlic.com/)
-(read November 16, 2026). Pick `guide …` in the page's preset selector. Each file
-states the topic and the intended transformation in its opening comments.
-
-**Expected means the guide's target behavior, not a claim that the configured
-compiler already implements it.** The playground runs the entire current optimizer,
-so later passes can simplify an example further. It transforms IR without executing
-the program; reading calls, runtime errors, and intentional infinite loops are safe
-to inspect here. Do not execute the error/loop examples expecting normal completion.
-
-## The 16 steps
-
-| Step | Preset | What to inspect |
-| --- | --- | --- |
-| [1](https://optimizer.krychlic.com/#step-1) | [Baseline](07_guide_01_baseline.ir) | A minimal program that should stay unchanged; compare CLI `--no-opt`. |
-| [2](https://optimizer.krychlic.com/#step-2) | [Validation](08_guide_02_validation.ir) | Slots, branch targets, and sparse textual value ids. See negative fixtures below. |
-| [3](https://optimizer.krychlic.com/#step-3) | [Call targets](09_guide_03_call_targets.ir) | Forward calls, builtins, and recursive calls. |
-| [4](https://optimizer.krychlic.com/#step-4) | [Use rewriting](10_guide_04_use_rewriting.ir) | Unary/binary uses, stores, call arguments, branch conditions, returns, and exit codes. |
-| [5](https://optimizer.krychlic.com/#step-5) | [Constant folding](11_guide_05_constant_folding.ir) | Dependent arithmetic, conversions, concatenation, and comparisons. |
-| [6](https://optimizer.krychlic.com/#step-6) | [Algebraic identities](12_guide_06_algebraic_identities.ir) | Unknown inputs, neutral elements, self-comparison, and preserved reading side effects. |
-| [7](https://optimizer.krychlic.com/#step-7) | [Branch folding](13_guide_07_branch_folding.ir) | True, false, and equal-target branches. |
-| [8](https://optimizer.krychlic.com/#step-8) | [Branch on NOT](14_guide_08_branch_on_not.ir) | Chained negations and a shared NOT that another instruction still uses. |
-| [9](https://optimizer.krychlic.com/#step-9) | [Dead code](15_guide_09_dead_code.ir) | An unused dependency chain and load disappear; unused reading calls survive. |
-| [10](https://optimizer.krychlic.com/#step-10) | [Store/load forwarding](16_guide_10_store_load_forwarding.ir) | Constant forwarding, repeated loads, overwrites, and calls between loads. |
-| [11](https://optimizer.krychlic.com/#step-11) | [Dead stores](17_guide_11_dead_stores.ir) | Unread scratch stores versus a slot read in the next block. |
-| [12](https://optimizer.krychlic.com/#step-12) | [Unreachable blocks](18_guide_12_unreachable_blocks.ir) | A nonzero entrypoint and remapping of both branch targets and jumps. |
-| [13](https://optimizer.krychlic.com/#step-13) | [Jump threading](19_guide_13_jump_threading.ir) | Empty chains on both branch edges; a nonempty block must remain. |
-| [14](https://optimizer.krychlic.com/#step-14) | [Unused functions](20_guide_14_unused_functions.ir) | An unreachable mutual-recursion component, live recursion, and call/entrypoint remapping. |
-| [15](https://optimizer.krychlic.com/#step-15) | [Allocation workload](21_guide_15_allocation_workload.ir) | Allocating folds, zero/multiple string uses, slot forwarding, and dead-block cleanup. |
-| [16](https://optimizer.krychlic.com/#step-16) | [Full pipeline](22_guide_16_full_pipeline.ir) | Folding enables forwarding, dead stores, branches, threading, and reachability; an input-dependent loop survives. |
-
-## Primers, traps, and outlook
+Open a preset and read the first comments for the specific change to look for.
+The reduced fractions and Simpson examples combine multiple passes on actual
+compiler-lowered IR. Smaller examples make their individual patterns easier to
+spot. Stack returns, physical storage reuse, and branch emission are codegen
+decisions. Inspect emitted IFJcode26 for their effect.
 
 | Topic | Preset |
 | --- | --- |
-| Integer overflow guards | [Integer guards](23_guide_integer_guards.ir) |
-| Signed zero, NaN-sensitive identities, infinity, and floating division by zero | [Floating-point guards](24_guide_floating_point_guards.ir) |
-| Ownership of folded/forwarded strings, multiple uses, unused allocations, escapes | [String ownership](25_guide_string_ownership.ir) |
-| Self-loops and multi-block jump cycles | [Jump cycles](26_guide_jump_cycles.ir) |
-| Local forwarding and loop boundaries | [Cross-block limits](27_guide_cross_block_limits.ir) |
-| Sparse ids after dead-code elimination | [Sparse value ids](28_guide_sparse_value_ids.ir) |
-| Future cross-block propagation, block coalescing, conversion/comparison peepholes, duplicate stores, and parameter-slot hints | [Future optimizations](29_guide_future_optimizations.ir) |
-| Integer division by zero | [Division by zero](30_guide_integer_division_by_zero.ir) |
-| INT32_MIN divided by -1 | [Division overflow](31_guide_integer_division_overflow.ir) |
-
-The baseline also covers the no-work fast path. The full-pipeline fixture is useful
-for timing comparisons, but it is deliberately small: it is not a performance
-benchmark or a replacement for the guide's full compiler/interpreter e2e fixture.
-Module organization, ownership rules, and allocation contracts describe how to
-implement and test passes rather than additional IR transformations.
+| Constant recursion | [constant recursive evaluation](32_constant_recursive_evaluation.ir) |
+| Specialization and clone reuse | [call specialization and reuse](33_call_specialization_and_reuse.ir) |
+| Tail recursion and constant specialization | [tail recursion and specialization](34_tail_recursion_and_specialization.ir) |
+| Lowered builtin effects and typed constant folding | [lowered builtin effects](35_lowered_builtin_effects.ir), [typed constant conversion](52_typed_constant_conversion.ir) |
+| Streamed interpolation | [streamed interpolation](36_streamed_interpolation.ir) |
+| Exact unrolling, including a guarded loop | [exact loop unrolling](37_exact_loop_unrolling.ir), [guarded loop expansion](46_guarded_loop_expansion.ir) |
+| Pair unrolling and equality termination | [pair unrolling with equality exit](38_pair_unrolling_with_equality_exit.ir), [dynamic loop fast and cleanup paths](39_dynamic_loop_fast_and_cleanup_paths.ir) |
+| Dynamic step dispatch | [dynamic range direction unswitching](40_dynamic_range_direction_unswitching.ir) |
+| Loop slot rotation | [loop slot rotation](41_loop_slot_rotation.ir) |
+| Reduced fractions: inlining, rotation, and zero-quotient bypass | [reduced fractions pipeline](42_reduced_fractions_pipeline.ir) |
+| Simpson integration: parity, weight promotion, and streaming | [simpson pipeline](43_simpson_pipeline.ir) |
+| Unused argument removal, preserved reads, and stack-return codegen | [unused arguments and stack returns](44_unused_arguments_and_stack_returns.ir) |
+| Closed-form range sum | [constant range sum](45_constant_range_sum.ir) |
+| Preserved fault order and unordered comparisons | [preserved loop fault order](47_preserved_loop_fault_order.ir), [unordered comparison guard](49_unordered_comparison_guard.ir) |
+| Straight-line and CFG inlining | [inlining repeated effectful calls](48_inlining_repeated_effectful_calls.ir), [cfg inlining](51_cfg_inlining.ir) |
+| Loop-invariant motion | [loop invariant motion](50_loop_invariant_motion.ir) |
+| Storage reuse, direct startup, and fused branches in codegen | [codegen storage and branches](53_codegen_storage_and_branches.ir) |
 
 ## Checks and format limits
 
@@ -60,11 +35,10 @@ python tests/guide_presets.py
 python tests/guide_presets.py --optimize
 ```
 
-The default check parses all 25 presets, verifies stable parser/printer round-trips,
-and checks rejection of three invalid fixtures. `--optimize` additionally runs the
-current optimizer and reparses every successful output. These are structural smoke
-checks, not assertions that the guide's intended transformations are implemented
-or that runtime output is equivalent. A timeout catches nonconverging passes.
+The default check parses all presets, verifies stable parser/printer round-trips,
+and checks rejection of three invalid fixtures. With `--optimize`, the script
+also reparses optimized IR and checks representative transformations for the
+current examples. A timeout catches nonconverging passes.
 Use `--binary <path>` to test a different build, including the debug flavor.
 
 Negative fixtures live outside the selectable presets so normal examples load:
@@ -84,13 +58,3 @@ failure setting immediately before optimization, catch the expected internal
 error, then free the context under a memory checker. The preset supplies an
 ownership-heavy workload; the playground CLI exposes no allocation-failure switch.
 A successful normal run alone does not prove failure cleanup or absence of leaks.
-
-### Observed with the configured compiler
-
-With compiler commit `709f1e7`, all 25 guide presets optimize and their output
-reparses. The optimizer eliminates dead instructions and stores, forwards stored
-constants within blocks, removes unreachable blocks and functions, and threads
-jumps. The integer guard examples use the guide's 32-bit boundaries. The
-compiler's IR stores signed 64-bit integers, so the examples can fold past the
-32-bit bounds, including `INT32_MIN / -1` to `2147483648`. Division by zero
-remains in the IR.

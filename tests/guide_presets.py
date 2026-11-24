@@ -57,6 +57,7 @@ EXPECTED = {
     "51": (r"= readBoolean\n  branch", r"store @\S+ int 10.*store @\S+ int 20",),
     "52": (r'= subStr v\d+, int 0, int 1', r'write string "A9822\.50true"'),
     "53": (r"= eq v\d+, int 15\n  branch",),
+    "54": (r'write string "value=13\\n"\n  readInt\n  exit int 57',),
 }
 
 ABSENT = {
@@ -67,6 +68,7 @@ ABSENT = {
     "43": r"idiv|call polynomial",
     "48": r"^  .*call ",
     "51": r"call choose",
+    "54": r"idiv|unreachable",
 }
 
 
@@ -79,8 +81,7 @@ def main():
     args = parser.parse_args()
     binary = args.binary.resolve()
     failures = []
-    presets = sorted(p for p in (ROOT / "presets").glob("*.ir")
-                     if int(p.name.split("_", 1)[0]) >= 32)
+    presets = sorted((ROOT / "presets").glob("*.ir"))
     assert EXPECTED.keys() <= {p.name[:2] for p in presets}, "missing current example"
 
     for preset in presets:

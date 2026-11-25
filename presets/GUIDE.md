@@ -26,6 +26,7 @@ decisions. Inspect emitted IFJcode26 for their effect.
 | Loop-invariant motion | [loop invariant motion](50_loop_invariant_motion.ir) |
 | Storage reuse, direct startup, and fused branches in codegen | [codegen storage and branches](53_codegen_storage_and_branches.ir) |
 | Grouped literal output and a known fault | [grouped writes and known fault](54_grouped_writes_and_known_fault.ir) |
+| Direct slot reads and preserved snapshots | [final slot operands](55_final_slot_operands.ir) |
 
 ## Checks and format limits
 
